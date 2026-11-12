@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { profilePatchError } from "@/lib/profile-patch.mjs";
+import { mergeTargetTitles, profilePatchError } from "@/lib/profile-patch.mjs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -50,7 +50,8 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
   if (p.email) candidate.email = p.email;
   if (p.location) candidate.location = p.location;
   if (Object.keys(candidate).length) out.candidate = candidate;
-  if (p.roles?.length) out.target_roles = { primary: p.roles.slice(0, 6) };
+  // The full proposal; the route adds it to the titles already there.
+  if (p.roles?.length) out.target_roles = { primary: p.roles };
   const comp: Record<string, unknown> = {};
   if (p.compMin && p.compMax) comp.target_range = `${p.compMin}-${p.compMax}`;
   if (p.currency) comp.currency = p.currency;
@@ -106,6 +107,12 @@ export async function POST(req: Request) {
     base = parsed as Record<string, unknown>;
   }
 
+  // Add, never replace: the proposal names a few titles, the profile may hold more.
+  const proposedRoles = (proposed.target_roles as { primary?: string[] } | undefined)?.primary;
+  if (proposedRoles) {
+    const current = isObj(base.target_roles) ? base.target_roles.primary : undefined;
+    proposed.target_roles = { primary: mergeTargetTitles(current, proposedRoles) };
+  }
   const merged = deepMerge(base, proposed);
   try {
     // Edit only the proposed keys' lines so the profile keeps its comments

@@ -26,3 +26,26 @@ export function profilePatchError(value) {
   }
   return null;
 }
+
+/**
+ * The assistant's "save your profile" ADDS target titles. It used to replace
+ * target_roles.primary with at most six, so "add Data Analyst" cost a user
+ * with ten titles four of them. Existing titles keep their order; new ones
+ * follow, compared case-insensitively; blanks are dropped.
+ *
+ * @param {unknown} existing target_roles.primary as it is in the profile
+ * @param {string[]} proposed titles the assistant proposed
+ * @returns {string[]}
+ */
+export function mergeTargetTitles(existing, proposed) {
+  const out = [];
+  const seen = new Set();
+  for (const title of [...(Array.isArray(existing) ? existing : []), ...proposed]) {
+    if (typeof title !== "string" || !title.trim()) continue;
+    const key = title.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(title.trim());
+  }
+  return out;
+}

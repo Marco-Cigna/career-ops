@@ -150,6 +150,67 @@ function setListInText(lines, section, key, items) {
 }
 
 /**
+ * portals.yml text with `roles` ADDED to title_filter.positive: the titles not
+ * already there (compared case-insensitively) go after the list's last item,
+ * and every other line, comments and the location filter included, is left
+ * as it was. For the assistant's "save your profile", which names a few titles
+ * and must not throw away a hand-built keyword list.
+ *
+ * @param {string} source portals.yml text
+ * @param {string[]} roles
+ * @returns {{text: string, added: string[]} | null} null when the list is not
+ *   in a shape this edit can place, or the result does not parse back to the
+ *   old list plus the new titles
+ */
+export function appendPortalTitlesText(source, roles) {
+  let doc;
+  try {
+    doc = /** @type {Record<string, any>} */ (yaml.load(source));
+  } catch {
+    return null;
+  }
+  const current = Array.isArray(doc?.title_filter?.positive) ? doc.title_filter.positive.map(String) : null;
+  if (!current) return null;
+  const seen = new Set(current.map((t) => t.trim().toLowerCase()));
+  const added = [];
+  for (const role of roles) {
+    const key = String(role).trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    added.push(String(role).trim());
+  }
+  if (added.length === 0) return { text: source, added };
+
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(/\r?\n/);
+  const head = lines.findIndex((l) => /^title_filter:\s*(#.*)?$/.test(l));
+  if (head < 0) return null;
+  let end = head + 1;
+  while (end < lines.length && !isTopLevelKey(lines[end])) end++;
+  const at = lines.findIndex((l, i) => i > head && i < end && /^\s+positive:\s*(#.*)?$/.test(l));
+  if (at < 0) return null;
+  const keyIndent = indentOf(lines[at]);
+  let last = -1;
+  for (let i = at + 1; i < end; i++) {
+    if (isNote(lines[i])) continue;
+    const sameIndentItem = indentOf(lines[i]) === keyIndent && lines[i].trimStart().startsWith("- ");
+    if (indentOf(lines[i]) <= keyIndent && !sameIndentItem) break;
+    last = i;
+  }
+  if (last < 0) return null;
+  const itemIndent = " ".repeat(indentOf(lines[last]));
+  lines.splice(last + 1, 0, ...added.map((r) => `${itemIndent}- ${JSON.stringify(r)}`));
+  const text = lines.join(eol);
+  try {
+    const after = /** @type {Record<string, any>} */ (yaml.load(text));
+    const expected = { ...doc, title_filter: { ...doc.title_filter, positive: [...current, ...added] } };
+    return isDeepStrictEqual(after, expected) ? { text, added } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * portals.yml text with the web-owned filters replaced, keeping every comment
  * and every commented-out company block. A round-trip through yaml.dump would
  * drop all of them (fix-slugs.mjs edits this file as text for the same reason).

@@ -56,7 +56,7 @@ export type ActionCtx = {
   applyExplore?: (patch: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void; // build a FREE discovery search
   // Both resolve to null once the route confirms the write, else to a sentence saying it was not saved.
   writeProfile?: (patch: Record<string, unknown>) => Promise<string | null>; // merge-safe config/profile.yml write
-  writePortals?: (roles: string[], location?: string[]) => Promise<string | null>; // merge-safe portals.yml title_filter write
+  writePortals?: (roles: string[], location?: string[], merge?: boolean) => Promise<string | null>; // portals.yml title_filter write; merge adds titles and leaves location_filter alone
   writePersonalization?: (patch: Record<string, unknown>) => void; // section-safe modes/_profile.md write
 };
 
@@ -340,13 +340,15 @@ const ACTIONS: Record<string, ActionDef> = {
       const p = coerceProfile(raw);
       const has = Object.values(p).some((v) => (Array.isArray(v) ? v.length : v !== undefined));
       if (!has) return { status: "ignored", note: "nothing to save" };
-      const bits = [p.roles?.length ? `roles: ${p.roles.join(", ")}` : "", p.location ? `in ${p.location}` : "", p.compMin && p.compMax ? `comp ${p.compMin}–${p.compMax}` : ""].filter(Boolean).join(" · ");
+      const bits = [p.roles?.length ? `add titles: ${p.roles.join(", ")} (your scanner looks for any new ones too)` : "", p.location ? `in ${p.location}` : "", p.compMin && p.compMax ? `comp ${p.compMin}–${p.compMax}` : ""].filter(Boolean).join(" · ");
       return {
         status: "confirm",
         summary: `Save your profile?${bits ? ` (${bits})` : ""}`,
         run: () => {
           const profile = ctx.writeProfile!(p as Record<string, unknown>);
-          const portals = p.roles?.length && ctx.writePortals ? ctx.writePortals(p.roles, p.location ? [p.location] : undefined) : null;
+          // Adds titles the scanner does not have yet; the location filter is
+          // not touched (one location must not replace a hand-built list).
+          const portals = p.roles?.length && ctx.writePortals ? ctx.writePortals(p.roles, undefined, true) : null;
           // Two writes, one card: when only one of them fails, the card also
           // says the other one was saved.
           const failure = Promise.all([profile, portals]).then(([profileFailure, portalsFailure]) => {

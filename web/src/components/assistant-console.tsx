@@ -549,8 +549,8 @@ export function AssistantConsole() {
           if (!failure) router.refresh();
           return failure ? `Your profile was NOT saved: ${failure}.` : null;
         }),
-      writePortals: (roles, location) =>
-        postAssistantWrite("/api/portals", { roles, location }).then((failure) =>
+      writePortals: (roles, location, merge) =>
+        postAssistantWrite("/api/portals", { roles, location, merge }).then((failure) =>
           failure ? `Your scan targets were NOT saved: ${failure}.` : null,
         ),
       writePersonalization: (patch) => {
