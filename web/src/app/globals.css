@@ -195,10 +195,38 @@ html {
   transform: scaleX(0);
 }
 
+/* ── Page entrance (app/template.tsx) ───────────────────────────────────── */
+/* Each page's blocks settle in from the top, one after another, so the page
+   reads top to bottom as it appears. Pages are a wrapper <div> holding the
+   header, intro and content blocks, so the stagger is on that second level;
+   a page whose root is not a wrapper still gets its root blocks staggered.
+   Fill-mode is `backwards`, never `both`: a kept end state is an animated
+   transform (an identity matrix, even when the keyframe says none), and any
+   transform makes every animated block a containing block for the
+   position: fixed drawers and dialogs inside it. `backwards` holds the start
+   state through each block's delay, then hands the element back its own style. */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(-14px); }
+  to { opacity: 1; transform: none; }
+}
+.page-enter > * > *,
+.page-enter > :not(div) {
+  animation: page-enter 650ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.page-enter > * > :nth-child(2) { animation-delay: 90ms; }
+.page-enter > * > :nth-child(3) { animation-delay: 180ms; }
+.page-enter > * > :nth-child(4) { animation-delay: 270ms; }
+.page-enter > * > :nth-child(5) { animation-delay: 360ms; }
+.page-enter > * > :nth-child(6) { animation-delay: 450ms; }
+.page-enter > * > :nth-child(7) { animation-delay: 540ms; }
+.page-enter > * > :nth-child(n + 8) { animation-delay: 630ms; }
+
 @media (prefers-reduced-motion: reduce) {
   .cli-cursor,
   .animate-terminal-popup,
-  .animate-fade-in-delayed {
+  .animate-fade-in-delayed,
+  .page-enter > * > *,
+  .page-enter > :not(div) {
     animation: none;
   }
   .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }
