@@ -93,6 +93,11 @@ function escapeHtml(text) {
   // numeric years/dates from the CV while `present` stayed true.
   if (text === null || text === undefined || typeof text === 'object') return '';
   return String(text)
+    // Payload text is plain text. article-digest.md and cv.md are Markdown, and a
+    // tailoring pass that copies a bolded metric ("**85%**") carries the markers
+    // into the CV, where they print as literal asterisks. Drop the pair, keep
+    // the words. A lone "**" (2**10) is left alone.
+    .replace(/\*\*(?=\S)([^*\n]*?\S)\*\*/g, '$1')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
