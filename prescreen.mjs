@@ -137,7 +137,10 @@ export function resolvePrescreenConfig(profile) {
     : pipeline.triage === true ? 'on' : pipeline.triage === false ? 'off' : 'auto';
   const output = typeof profile?.language?.output === 'string' && profile.language.output.trim()
     ? profile.language.output.trim() : 'en';
+  // Same rule as modes/_shared.md (Spend Tier): absent or invalid reads as standard.
+  const tier = typeof profile?.spend_tier === 'string' ? profile.spend_tier.trim().toLowerCase() : '';
   return {
+    spendTier: ['economy', 'standard', 'premium'].includes(tier) ? tier : 'standard',
     maxYears: maxYears !== null && maxYears >= 0 ? maxYears : null,
     triageThreshold: threshold !== null && threshold > 0 && threshold <= 5 ? threshold : DEFAULT_TRIAGE_THRESHOLD,
     triage,
@@ -473,6 +476,7 @@ async function main() {
       `TRIAGE_NOT_READY_REASON=${brief.reason}`,
       `MAX_YEARS=${config.maxYears ?? ''}`,
       `OUTPUT_LANGUAGE=${config.outputLanguage}`,
+      `SPEND_TIER=${config.spendTier}`,
     ].join('\n') + '\n');
     return;
   }

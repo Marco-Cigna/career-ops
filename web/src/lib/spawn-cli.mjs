@@ -43,8 +43,11 @@ import { prepareCliLaunch } from "./cli-launch.mjs";
  * @param {string[]} args
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options
  * @param {{cliId: string, capabilities: import("./worker-capabilities.mjs").Capabilities}} fencing
+ * @param {{input?: string}} [io] `input` is written to stdin before it is closed, for a
+ *   prompt too long for a command line whose worker has no Read tool to spill it to
+ *   (the triage pass). stdin is still closed straight after, so nothing can wait on it.
  */
-export function spawnHeadlessCli(binPath, args, options, fencing) {
+export function spawnHeadlessCli(binPath, args, options, fencing, io = {}) {
   // Fail fast rather than spawn unfenced. Omitting `fencing` used to spread
   // `undefined` into nothing, leaving cliId undefined — which matches no fencer,
   // so the raw argv was spawned with no error at all. The docstring's "it does
@@ -69,6 +72,9 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   // Nothing spawned here needs a console, so never inherit one. Set after the
   // caller's options so no caller can opt back in. No-op on POSIX (#3809).
   const child = spawn(launch.command, launch.args, { ...options, windowsHide: true });
-  child.stdin?.end();
+  // A child that exits before reading its input must not take the server down with EPIPE.
+  child.stdin?.on?.("error", () => {});
+  if (typeof io.input === "string") child.stdin?.end(io.input);
+  else child.stdin?.end();
   return child;
 }

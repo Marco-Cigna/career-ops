@@ -126,9 +126,9 @@ await ok('discard lines: three fields without an id, four with one, no stray tab
 });
 
 await ok('config: defaults, bounds, and YAML booleans for triage', () => {
-  assert.deepStrictEqual(resolvePrescreenConfig({}), { maxYears: null, triageThreshold: 3.5, triage: 'auto', parallel: null, outputLanguage: 'en' });
+  assert.deepStrictEqual(resolvePrescreenConfig({}), { spendTier: 'standard', maxYears: null, triageThreshold: 3.5, triage: 'auto', parallel: null, outputLanguage: 'en' });
   const c = resolvePrescreenConfig({ pipeline: { triage_threshold: 4, triage: false, parallel: 1, prescreen: { max_years: 5 } }, language: { output: 'es' } });
-  assert.deepStrictEqual(c, { maxYears: 5, triageThreshold: 4, triage: 'off', parallel: 1, outputLanguage: 'es' });
+  assert.deepStrictEqual(c, { spendTier: 'standard', maxYears: 5, triageThreshold: 4, triage: 'off', parallel: 1, outputLanguage: 'es' });
   assert.strictEqual(resolvePrescreenConfig({ pipeline: { parallel: 0, triage_threshold: 9 } }).parallel, null);
   assert.strictEqual(resolvePrescreenConfig({ pipeline: { triage_threshold: 9 } }).triageThreshold, 3.5);
 });

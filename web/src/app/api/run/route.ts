@@ -33,13 +33,15 @@ import { readJsonObject } from "@/lib/json-body";
 import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.mjs";
 import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
+import { modelForRun } from "@/lib/pipeline-gate.mjs";
+import { gateEvaluation, loadPipelineSettings } from "@/lib/pipeline-gate-run";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown }>(req);
+  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown; gate?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
   const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
@@ -205,6 +207,8 @@ export async function POST(req: Request) {
   // taken before the JD prefetch, so a row delete cannot land in that window.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
   let child;
+  // Status lines from the cost gate, shown at the top of the run log.
+  let gateNotes: string[] = [];
   let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
   let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
@@ -226,6 +230,34 @@ export async function POST(req: Request) {
     }
     const prefetchedJd = prefetch?.text ?? null;
     const closedEvidence = prefetch?.closedEvidence ?? null;
+    // spend_tier and the pipeline block. Read once: it picks the model for this
+    // run and decides whether the triage pass below runs.
+    const settings = await loadPipelineSettings();
+    // The batch runner's cost gates (rules, then economy-model triage), for runs
+    // that ask for them. Queue-driven runs do (Score shortlist, scheduled
+    // scoring); a posting the user pasted by hand does not, the same rule as
+    // modes/batch.md: they already decided it was worth a look.
+    if (kind === "evaluate" && body.gate === true && !closedEvidence) {
+      const gate = await gateEvaluation({ url: input, jdText: prefetchedJd, cliId, binPath, settings, signal: req.signal });
+      if (req.signal.aborted) {
+        if (writeToken !== null) releaseTrackerWrite(writeToken);
+        return new Response(null, { status: 499 });
+      }
+      if (gate.skip) {
+        if (writeToken !== null) releaseTrackerWrite(writeToken);
+        const lines = [
+          ...gate.notes.map((label) => ({ type: "status", label })),
+          { type: "text", text: `Skipped before the full evaluation (${gate.stage === "triage" ? "triage on the economy model" : "pre-screen rules, no tokens used"}): ${gate.reason}\n` },
+          { type: "gated", reason: "dealbreaker", message: gate.reason, confirmationRequired: false },
+        ];
+        return new Response(lines.map((l) => JSON.stringify(l)).join("\n") + "\n", {
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache, no-transform" },
+        });
+      }
+      gateNotes = gate.notes;
+    }
+    const model = modelForRun(cliId, settings);
+    if (model) gateNotes.push(`Model: ${model} (spend_tier: ${settings?.spendTier})`);
     if (evaluationInstructions) {
       instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
     }
@@ -264,7 +296,7 @@ export async function POST(req: Request) {
     // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
     // envelope-parsing routes rely on.
     const buildArgs = (p: string) =>
-      isClaude ? claudeCliArgs({ kind, prompt: p }) : (spec.streamArgs ?? spec.args)(p);
+      isClaude ? claudeCliArgs({ kind, prompt: p, model }) : (spec.streamArgs ?? spec.args)(p);
     // The prompt inlines the whole _profile.md (#4003), so it can outgrow the OS
     // command-line limit (ENAMETOOLONG on Windows). Every kind that reaches here
     // can Read (see TOOL_SCOPES), so an oversized prompt goes to a file under the
@@ -403,6 +435,7 @@ export async function POST(req: Request) {
       // isFencingNotice() rather than a literal spelled in two files.
       const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: capabilitiesFor(kind) });
       if (fencing.notice) send({ type: "status", label: fencing.notice });
+      for (const label of gateNotes) send({ type: "status", label });
       if (substitution) send({ type: "status", label: substitution });
       // Time-based keepalive. The stream is silent whenever the agent is thinking
       // or inside a long tool call, and in pdf mode it is silent for the whole

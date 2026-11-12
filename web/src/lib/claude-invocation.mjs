@@ -150,13 +150,17 @@ export function grantsWriteCapability(scope) {
  * Assembled here, not in the route, so a guard can assert on the command line
  * that actually ships instead of on source text that can be rewritten around it.
  *
- * @param {{kind: string, prompt: string}} args
+ * `model` is the spend-tier model (pipeline-gate.mjs). Without it the CLI's own
+ * default runs, which ignored config/profile.yml's spend_tier on every web run.
+ *
+ * @param {{kind: string, prompt: string, model?: string | null}} args
  * @returns {string[]}
  */
-export function claudeCliArgs({ kind, prompt }) {
+export function claudeCliArgs({ kind, prompt, model }) {
   const scope = toolScopeFor(kind);
   return [
     "-p", prompt,
+    ...(model ? ["--model", model] : []),
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
@@ -257,4 +261,23 @@ export function verifyClaudeArgs(args, capabilities) {
     );
   }
   return args;
+}
+
+/**
+ * The argv for the economy-model triage pass (modes/triage.md). The prompt goes in
+ * on stdin: it carries the brief and the JD, and this worker has no Read tool to
+ * take a spilled prompt from. It gets no tools at all and no MCP servers, and the
+ * deny list still names every restricted tool so verifyClaudeArgs can certify it.
+ *
+ * @param {{model: string}} args
+ * @returns {string[]}
+ */
+export function claudeTriageArgs({ model }) {
+  return [
+    "-p",
+    "--model", model,
+    "--strict-mcp-config",
+    "--tools", "",
+    "--disallowedTools", scopeFrom("").disallowed,
+  ];
 }

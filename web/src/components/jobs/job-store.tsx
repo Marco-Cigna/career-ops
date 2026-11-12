@@ -7,6 +7,14 @@ import { createWorkerFeedback } from "@/lib/worker-feedback.mjs";
 import { readJobStream } from "@/lib/job-stream.mjs";
 import { createJobsPersister } from "@/lib/jobs-persist.mjs";
 import type { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
+import { createRunQueue } from "@/lib/run-queue.mjs";
+
+// One queue for the whole tab: queued evaluations share pipeline.parallel slots.
+const runQueue = createRunQueue(async () => {
+  const res = await fetch("/api/run/limits");
+  const data = res.ok ? await res.json() : null;
+  return typeof data?.parallel === "number" ? data.parallel : 1;
+});
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobGate = { reason: (typeof EVALUATION_GATE_REASONS)[number]; message: string; confirmationRequired: boolean };
@@ -32,7 +40,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; brief?: Record<string, string>; evaluationSections?: string[] };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; brief?: Record<string, string>; evaluationSections?: string[]; /** run the cost gates (prescreen, triage) first, and wait for a queue slot */ gate?: boolean };
 
 type Ctx = {
   jobs: Job[];
@@ -76,6 +84,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     return () => { owner.dispose(); feedback.current = null; };
   }, []);
   const seq = useRef(0);
+  // Jobs removed while they waited for a queue slot must not start afterwards.
+  const removed = useRef(new Set<string>());
   const loaded = useRef(false);
 
   // restore history
@@ -175,6 +185,22 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }));
           return;
         }
+        // Queued runs wait for a slot here, after the CLI check so a
+        // misconfigured queue fails at once instead of one job at a time.
+        let holdsSlot = false;
+        if (opts.gate === true) {
+          const waitStep: JobStep = { kind: "status", label: "Queued — waiting for the evaluation ahead to finish", ts: Date.now() };
+          patch(id, (j) => ({ ...j, steps: [...j.steps, waitStep] }));
+          await runQueue.acquire();
+          holdsSlot = true;
+          if (removed.current.has(id)) {
+            runQueue.release();
+            return;
+          }
+          const goStep: JobStep = { kind: "status", label: "Starting…", ts: Date.now() };
+          steps.push(goStep);
+          patch(id, (j) => ({ ...j, startedAt: Date.now(), steps: [...j.steps, goStep] }));
+        }
         let text = "";
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
         let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
@@ -184,6 +210,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         const finish = (status: "done" | "error" | "gated", lastLabel?: string, gate?: JobGate) => {
           if (finished) return;
           finished = true;
+          if (holdsSlot) runQueue.release();
           feedback.current?.push({ ...job, status });
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
           const cost = status !== "error" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
@@ -216,7 +243,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           const res = await fetch("/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, brief: opts.brief, evaluationSections: opts.evaluationSections }),
+            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, brief: opts.brief, evaluationSections: opts.evaluationSections, gate: opts.gate === true ? true : undefined }),
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
@@ -264,7 +291,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [patch],
   );
 
-  const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);
+  const removeJob = useCallback((id: string) => {
+    removed.current.add(id);
+    setJobs((js) => js.filter((j) => j.id !== id));
+  }, []);
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running")), []);
 
   // A new object only when the list or an action changes, not on every render

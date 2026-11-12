@@ -382,7 +382,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
     for (const it of shortlist) {
-      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId, evaluationSections: sections });
+      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId, evaluationSections: sections, gate: true });
     }
     setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
