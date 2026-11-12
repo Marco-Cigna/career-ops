@@ -50,7 +50,7 @@ export function AnalyticsShell({ total, view, children }: {
         </div>
       </header>
 
-      <nav aria-label="Analytics views" className="mt-5 -mb-px flex gap-1 overflow-x-auto border-b border-border">
+      <nav aria-label="Analytics views" className="mt-5 -mb-px flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border">
         <AnalyticsTab href="/analytics" active={view === "progress"} icon={<BarChart3 className="size-3.5" />}>
           Search progress
         </AnalyticsTab>

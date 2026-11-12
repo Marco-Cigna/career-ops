@@ -13,12 +13,12 @@
  *       label: Sync job applications
  *       description: Optional one-liner.
  *       steps:                            # run in order; a failed step stops the rest
- *         - run: ["C:/Python312/python.exe", "tracker.py"]
- *           cwd: "C:/Users/me/Job search"
+ *         - run: ["<path to python>", "tracker.py"]
+ *           cwd: "<folder the script runs in>"
  *         - run: ["node", "{data_root}/scripts/import.mjs", "--code-root", "{code_root}"]
  *       timeout_minutes: 15               # per run, default 15, max 120
  *       stale_after_hours: 24             # the "last run" note turns amber after this
- *       wait_for_closed: ["C:/Users/me/Job search/tracker.xlsx"]
+ *       wait_for_closed: ["<folder>/tracker.xlsx"]
  *                                         # refuse to start while one of these is
  *                                         # open elsewhere (an Excel workbook)
  *

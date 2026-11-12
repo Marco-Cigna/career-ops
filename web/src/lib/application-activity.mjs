@@ -23,6 +23,7 @@ const REPLY = new Set(["RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED",
 const INTERVIEW_OR_LATER = new Set(["INTERVIEW", "OFFER", "HIRED"]);
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const DAY = 86_400_000;
+const STAGE_LABELS = { APPLIED: "Applied", RESPONDED: "Responded", ASSESSMENT: "Assessment", INTERVIEW: "Interview", OFFER: "Offer", HIRED: "Hired", REJECTED: "Rejected" };
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const validIso = (s) => {
@@ -62,7 +63,7 @@ export function workArrangement(notes) {
   if (/\bhybrid\b/.test(t)) return "Hybrid";
   if (/\bremote\b/.test(t)) return "Remote";
   if (/\bon-?site\b|\bin-office\b/.test(t)) return "On-site";
-  return "Not stated";
+  return "Not specified";
 }
 
 function breakdown(values) {
@@ -137,7 +138,9 @@ export function computeApplicationActivity({ applications = [], statusLog = [], 
     .map((s) => dayNumber(s.responseDate) - dayNumber(s.applied));
   const first = dated.reduce((min, s) => (!min || s.applied < min ? s.applied : min), null);
   const last = dated.reduce((max, s) => (!max || s.applied > max ? s.applied : max), null);
-  const trackingDays = first && todayDay !== null ? Math.max(1, todayDay - dayNumber(first) + 1) : 0;
+  // Days since the first application, as the old workbook counted them
+  // (TODAY() - first date); pace divides by at least one day.
+  const trackingDays = first && todayDay !== null ? Math.max(0, todayDay - dayNumber(first)) : 0;
 
   // Twelve calendar months ending with today's.
   const months = [];
@@ -157,13 +160,21 @@ export function computeApplicationActivity({ applications = [], statusLog = [], 
 
   const total = sent.length;
   const responses = sent.filter((s) => s.replied).length;
+  const rejected = sent.filter((s) => s.rejected).length;
+  // Where every sent application stands now, every stage listed even at zero.
+  const stageOf = (s) => (s.status === "DISCARDED" || s.status === "SKIP" ? "Withdrawn" : STAGE_LABELS[s.status] ?? "Other");
+  const pipeline = ["Applied", "Responded", "Assessment", "Interview", "Offer", "Hired", "Rejected", "Withdrawn"]
+    .map((label) => ({ label, count: sent.filter((s) => stageOf(s) === label).length }))
+    .map((row) => ({ ...row, pct: total ? (row.count / total) * 100 : 0 }));
   const goal = (target, count) => (Number.isFinite(target) && target > 0 ? { target, count, pct: Math.min(100, (count / target) * 100) } : null);
   return {
     total,
     awaiting: sent.filter((s) => s.status === "APPLIED").length,
     responses,
     responseRate: total ? (responses / total) * 100 : null,
-    rejected: sent.filter((s) => s.rejected).length,
+    rejected,
+    rejectionRate: total ? (rejected / total) * 100 : null,
+    pipeline,
     interviews: sent.filter((s) => s.interviewed).length,
     offers: sent.filter((s) => s.offered).length,
     last7: within(7),
@@ -176,12 +187,14 @@ export function computeApplicationActivity({ applications = [], statusLog = [], 
     firstApplied: first,
     lastApplied: last,
     trackingDays,
-    perWeek: trackingDays ? (dated.length / trackingDays) * 7 : 0,
+    perDay: total / Math.max(trackingDays, 1),
     months,
     sources: breakdown(sent.map((s) => s.source)),
     arrangements: breakdown(sent.map((s) => s.arrangement)),
     goals: {
-      year: goal(goals.perYear, thisYear),
+      // Overall progress against the yearly goal: every application sent, as
+      // the old workbook measured it.
+      year: goal(goals.perYear, total),
       rolling30: goal(goals.per30Days, within(30)),
     },
   };

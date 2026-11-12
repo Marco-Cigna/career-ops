@@ -87,7 +87,9 @@ function runStep(command: string, args: string[], cwd: string | null, deadline: 
     try {
       child = spawn(command, args, {
         cwd: cwd ?? careerOpsRoot(),
-        env: { ...process.env, CAREER_OPS_ROOT: careerOpsRoot(), CAREER_OPS_CODE_ROOT: resolveCodeRoot(process.cwd(), process.env), PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1" },
+        // CAREER_OPS_NODE: the dashboard's own Node, for a script that runs career-ops
+        // scripts itself (a node on PATH may be a version-manager shim, or absent).
+        env: { ...process.env, CAREER_OPS_ROOT: careerOpsRoot(), CAREER_OPS_CODE_ROOT: resolveCodeRoot(process.cwd(), process.env), CAREER_OPS_NODE: process.execPath, PYTHONIOENCODING: "utf-8", PYTHONUNBUFFERED: "1" },
         // No shell: the arguments are passed as they are written in the config.
         shell: false,
         // A window of its own is the program's business (a browser it opens

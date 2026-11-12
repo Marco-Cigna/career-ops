@@ -69,9 +69,10 @@ test("recent windows, pace and goals", () => {
     goals: { perYear: 250, per30Days: 30 },
   });
   assert.deepEqual([r.last7, r.last30, r.thisMonth, r.thisYear], [2, 3, 2, 4]);
-  assert.equal(r.trackingDays, 31);
+  assert.equal(r.trackingDays, 30); // 2026-11-12 minus 2026-10-13, as the workbook counted
+  assert.equal(r.perDay, 4 / 30);
   assert.deepEqual(r.goals.rolling30, { target: 30, count: 3, pct: 10 });
-  assert.equal(r.goals.year.count, 4);
+  assert.equal(r.goals.year.count, 4); // every application sent
   assert.equal(computeApplicationActivity({ applications: [], statusLog: [], today: "2026-11-12" }).goals.year, null);
 });
 
@@ -84,5 +85,15 @@ test("dates, sources and arrangements are read the way the tracker writes them",
   assert.equal(applicationSource(""), "Unknown");
   assert.equal(workArrangement("via LinkedIn; On-site"), "On-site");
   assert.equal(workArrangement("Remote; x"), "Remote");
-  assert.equal(workArrangement("nothing"), "Not stated");
+  assert.equal(workArrangement("nothing"), "Not specified");
+});
+
+test("the pipeline lists every stage, and the rejection rate is over everything sent", () => {
+  const r = computeApplicationActivity({
+    applications: [app(1, "Applied", ""), app(2, "Rejected", ""), app(3, "Rejected", ""), app(4, "Interview", ""), app(5, "Discarded", "")],
+    statusLog: [{ num: 5, date: "2026-10-01", from: "Evaluated", to: "Applied" }],
+    today: "2026-11-12",
+  });
+  assert.deepEqual(r.pipeline.map((p) => [p.label, p.count]), [["Applied", 1], ["Responded", 0], ["Assessment", 0], ["Interview", 1], ["Offer", 0], ["Hired", 0], ["Rejected", 2], ["Withdrawn", 1]]);
+  assert.equal(r.rejectionRate, 40);
 });
