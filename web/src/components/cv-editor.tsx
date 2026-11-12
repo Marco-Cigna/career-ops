@@ -242,7 +242,7 @@ export function CvEditor() {
             onChange={(e) => dispatch({ type: "edit", content: e.target.value })}
             spellCheck={false}
             placeholder="# Your Name&#10;&#10;## Summary&#10;..."
-            className="min-h-[60vh] w-full resize-none rounded-2xl border border-border bg-surface/50 p-4 font-mono text-sm leading-relaxed outline-none transition-colors placeholder:text-faint focus:border-brand/40"
+            className="min-h-[60vh] w-full resize-none rounded-2xl border border-border bg-surface/50 p-4 font-code text-sm leading-relaxed outline-none transition-colors placeholder:text-faint focus:border-brand/40"
           />
           <article className="report-prose min-h-[60vh] [&_p]:whitespace-pre-line overflow-auto rounded-2xl border border-border bg-surface/30 p-5">
             {state.content.trim() ? (

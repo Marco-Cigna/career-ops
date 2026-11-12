@@ -1,6 +1,5 @@
 "use client";
 
-import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import { CvIngest } from "@/components/cv/cv-ingest";
 import { LinkedInPaste } from "@/components/linkedin-paste";
@@ -23,7 +22,7 @@ export function FirstRunHome() {
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
             <span className="text-faint">//</span> local-first · your machine
           </p>
-          <h1 className={`${instrumentSerif.className} mt-3 text-4xl leading-[1.05] text-landing md:text-5xl`}>
+          <h1 className={`font-display mt-3 text-4xl leading-[1.05] text-landing md:text-5xl`}>
             Drop your CV. See who&apos;s hiring you in 60 seconds.
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted">

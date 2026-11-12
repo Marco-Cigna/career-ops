@@ -5,7 +5,6 @@ import { AlertCircle, CheckCircle2, Clock, Edit3, Globe, Loader2, MoreVertical, 
 import type { ScheduledJob } from "@/lib/scheduled-jobs";
 import { scanEngineLabel, scheduleCadenceLabel } from "@/lib/schedule-label.mjs";
 import { cn } from "@/lib/cn";
-import { instrumentSerif } from "@/lib/fonts";
 
 export function JobCard({
   job,
@@ -76,7 +75,7 @@ export function JobCard({
             {letter}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className={`${instrumentSerif.className} truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand-text`}>
+            <h2 className={`font-display truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand-text`}>
               {job.name}
             </h2>
             <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-muted">

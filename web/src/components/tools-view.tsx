@@ -135,7 +135,7 @@ export function ToolsView() {
         {output && (
           <div className="rounded-xl border border-border bg-background">
             <p className="border-b border-border px-4 py-2 text-xs text-muted">{(shown?.label ?? output.id) + " — " + outcome}</p>
-            <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs text-foreground">{output.error || output.output || "No output."}</pre>
+            <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-code text-xs text-foreground">{output.error || output.output || "No output."}</pre>
           </div>
         )}
       </section>

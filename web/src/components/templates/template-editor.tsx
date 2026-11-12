@@ -90,7 +90,7 @@ export function TemplateEditor({ kind, name, title, onClose, onSaved }: Props) {
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
           disabled={text === null}
-          className="mt-2 h-96 w-full rounded-md border border-border bg-transparent p-2 font-mono text-xs"
+          className="mt-2 h-96 w-full rounded-md border border-border bg-transparent p-2 font-code text-xs"
         />
       )}
       {error && (

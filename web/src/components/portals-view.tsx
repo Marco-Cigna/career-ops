@@ -85,7 +85,7 @@ export function PortalsView({
           <span className="font-medium text-red-700 dark:text-red-400">The portal check did not finish</span> — no
           portal was verified, so none is shown as healthy. Try again, or run{" "}
           <code className="text-foreground">node verify-portals.mjs</code> to see why.{" "}
-          <code className="break-all font-mono text-xs text-faint">{res.error}</code>
+          <code className="break-all font-code text-xs text-faint">{res.error}</code>
         </p>
       )}
       {showPortalsSetup(missing, res) && (

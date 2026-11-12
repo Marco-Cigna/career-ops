@@ -99,7 +99,7 @@ export function LocalToolsSection() {
               {last?.output && (
                 <details className="mt-2" open={busy}>
                   <summary className="cursor-pointer select-none text-xs text-muted">{busy ? "Live output" : "Output of the last run"}</summary>
-                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface p-3 font-mono text-[11px] text-foreground">{last.output.trim()}</pre>
+                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface p-3 font-code text-[11px] text-foreground">{last.output.trim()}</pre>
                 </details>
               )}
             </li>

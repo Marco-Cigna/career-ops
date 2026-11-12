@@ -27,10 +27,18 @@
   --color-brand-soft: hsl(26 73% 51% / 0.12);
   --color-brand-secondary: #fc7744;
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
-  --font-display: var(--font-instrument-serif), ui-serif, Georgia, serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  /* One family for the whole interface: Inter. Headings, figures and small
+     labels use it too; their weight and tracking are set in the components
+     layer below. `font-mono` is a role, not a typeface: the figures and
+     labels it marks render in Inter with tabular numerals. Code (editors,
+     paths, script output, <code>/<pre>/<kbd>) uses `font-code`, the only
+     monospace face. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: var(--font-sans);
+  --font-display: var(--font-sans);
+  --font-mono: var(--font-sans);
+  --font-code: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --default-mono-font-family: var(--font-code);
 }
 
 /* Semantic surfaces reference runtime vars so they swap with the theme class. */
@@ -98,9 +106,22 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* Inter's weights and tracking for the roles that used other faces. In the
+   components layer, so a utility on the same element (font-semibold,
+   tracking-tight) still wins. */
+@layer components {
+  .font-display {
+    font-weight: 500;
+    letter-spacing: -0.025em;
+  }
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 @layer utilities {
   .font-serif-italic {
-    font-family: var(--font-instrument-serif-italic), var(--font-serif);
+    font-family: var(--font-sans);
     font-style: italic;
   }
   /* Ambient dot grid — adapts to the theme via --dot. Pure CSS, 0 DOM. */
@@ -295,7 +316,7 @@ html {
 .report-prose a { color: var(--color-brand-text); text-decoration: none; }
 .report-prose a:hover { text-decoration: underline; }
 .report-prose code {
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
   font-size: 0.85em;
   color: var(--color-brand-text);
   background: var(--surface-hover);

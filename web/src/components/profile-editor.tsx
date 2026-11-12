@@ -114,7 +114,7 @@ export function ProfileEditor() {
           disabled={loading}
           spellCheck={spec.kind === "markdown"}
           rows={28}
-          className="mt-3 w-full resize-y rounded-xl border border-border bg-background p-4 font-mono text-[13px] leading-relaxed text-foreground focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+          className="mt-3 w-full resize-y rounded-xl border border-border bg-background p-4 font-code text-[13px] leading-relaxed text-foreground focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
         />
 
         <div className="mt-3 flex flex-wrap items-center gap-3">

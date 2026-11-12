@@ -33,7 +33,7 @@ export default function ReportError({
             The file is there, but the server could not open it. Common causes are its permissions, a sync app
             holding it, or a folder with a .md name under <code className="text-foreground">reports/</code>.
           </p>
-          {error.digest && <p className="mt-3 font-mono text-xs text-faint">Error digest {error.digest}</p>}
+          {error.digest && <p className="mt-3 font-code text-xs text-faint">Error digest {error.digest}</p>}
           <button
             type="button"
             onClick={() => retry()}

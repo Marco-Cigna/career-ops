@@ -8,7 +8,6 @@ import remarkGfm from "remark-gfm";
 import { noMarkdownImages } from "@/lib/markdown-options.mjs";
 import { Upload, FileText, Loader2, Check, AlertTriangle, Lock, ArrowRight, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { instrumentSerif } from "@/lib/fonts";
 import { cvStreamErrorMessage, parseCvStream, type CvSeed } from "@/lib/cv/quality";
 import { cvReadiness } from "@/lib/cv/readiness.mjs";
 import { ingestErrorMessage } from "@/lib/cv/ingest-error.mjs";
@@ -389,7 +388,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           <>
             <div className="flex items-center gap-2.5">
               <Loader2 className="size-4 animate-spin text-brand-text" />
-              <span className={`${instrumentSerif.className} text-lg text-foreground`}>{trace || "Reading your CV…"}</span>
+              <span className={`font-display text-lg text-foreground`}>{trace || "Reading your CV…"}</span>
             </div>
             <p className="mt-3 text-xs text-muted">Converting to Markdown with your configured AI CLI…</p>
             {md && <div className="co-cvtrace mt-4 max-h-40 overflow-hidden rounded-lg border border-border bg-surface/40 p-3 text-[11px] text-faint">{md.slice(0, 400)}…</div>}
@@ -405,7 +404,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
       <style>{STYLE}</style>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FileText className="size-4 text-brand-text" />
-        <h3 className={`${instrumentSerif.className} text-lg text-foreground`}>Here&apos;s your CV — review and save</h3>
+        <h3 className={`font-display text-lg text-foreground`}>Here&apos;s your CV — review and save</h3>
         {readiness && (
           <span
             className={cn(
@@ -441,7 +440,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           value={md}
           disabled={phase === "saving"}
           onChange={(e) => setMd(e.target.value)}
-          className="h-72 w-full resize-none rounded-lg border border-border bg-surface/40 p-3 font-mono text-[12px] leading-relaxed outline-none focus:border-brand/40"
+          className="h-72 w-full resize-none rounded-lg border border-border bg-surface/40 p-3 font-code text-[12px] leading-relaxed outline-none focus:border-brand/40"
         />
         <div className="prose prose-sm dark:prose-invert h-72 max-w-none [&_p]:whitespace-pre-line overflow-y-auto rounded-lg border border-border bg-surface/40 p-3 text-[13px]">
           <ReactMarkdown remarkPlugins={[remarkGfm]} {...noMarkdownImages}>{md}</ReactMarkdown>

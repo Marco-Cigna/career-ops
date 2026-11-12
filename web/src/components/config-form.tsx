@@ -251,7 +251,7 @@ export function ConfigForm() {
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="sk-…"
                 autoComplete="off"
-                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
+                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-code text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
               />
               <p className="mt-2 text-xs text-faint">
                 Stored only in this browser — never sent anywhere but your chosen provider.

@@ -86,7 +86,7 @@ export function CommandPalette({ followupsEnabled }: { followupsEnabled: boolean
         <Search className="size-4" />
         Search
         {shortcut && (
-          <kbd className="ml-auto rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-faint">{shortcut}</kbd>
+          <kbd className="ml-auto rounded border border-border px-1.5 py-0.5 font-code text-[10px] text-faint">{shortcut}</kbd>
         )}
       </button>
 
