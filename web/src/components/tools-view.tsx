@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Loader2, Play, Sparkles } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
+import { LocalToolsSection } from "@/components/local-tools-section";
 import { AGENT_MODES, SCRIPT_TOOLS } from "@/lib/tools-catalog.mjs";
 
 type Output = { id: string; code: number; output: string; timedOut: boolean; error?: string };
@@ -52,6 +53,7 @@ export function ToolsView() {
           : "finished with findings (exit " + output.code + ")";
   return (
     <div className="space-y-8">
+      <LocalToolsSection />
       <section aria-labelledby="agent-tools-heading" className="rounded-xl border border-border bg-surface/30 p-4">
         <h2 id="agent-tools-heading" className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Sparkles className="size-4 text-brand-text" /> Agent tools
