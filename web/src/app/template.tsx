@@ -31,11 +31,17 @@ export default function PageTemplate({ children }: { children: React.ReactNode }
       const root = el.firstElementChild;
       if (!root) return;
       if (root.matches(PLACEHOLDER)) {
-        placeholderSince ??= performance.now();
+        // A second placeholder replacing the first (the route's loading.tsx,
+        // then the page's own while its data loads) is the same screen to the
+        // eye: "hold" keeps it from playing the entrance a second time.
+        if (placeholderSince === null) placeholderSince = performance.now();
+        else el.dataset.enter = "hold";
         return;
       }
       if (placeholderSince !== null && performance.now() - placeholderSince >= PLACEHOLDER_SEEN_MS) {
         el.dataset.enter = "swap";
+      } else {
+        delete el.dataset.enter;
       }
       observer.disconnect();
     };

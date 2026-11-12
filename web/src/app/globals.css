@@ -261,6 +261,11 @@ html {
   animation: page-swap 220ms ease-out backwards;
   animation-delay: 0ms;
 }
+/* A placeholder replaced by an identical one: show it as it is. */
+.page-enter[data-enter="hold"] > * > *,
+.page-enter[data-enter="hold"] > :not(div) {
+  animation: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .cli-cursor,

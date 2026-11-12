@@ -23,6 +23,7 @@ import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { ApplyNext } from "@/components/apply-next";
 import { resolveHeroState, mayClaimAllClear, showsQueue, missingSourceLabel, displayCounts } from "@/lib/home/hero-state.mjs";
 import { homeFollowupRemainder } from "@/lib/home/followups-shown.mjs";
+import { TodayPageSkeleton } from "@/components/page-loading-skeletons";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -119,6 +120,15 @@ export function TodayDashboard({
     };
   }, [refetch, router]);
 
+  // The first fetch shows the page's placeholder (TodayPageSkeleton), not a
+  // dashboard that says it is loading: that half-loaded screen read as a second
+  // page between the placeholder and the real one. Later refetches (after an
+  // evaluation finishes) keep the page and update it in place.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!followupsLoading && !freshLoading) setSettled(true);
+  }, [followupsLoading, freshLoading]);
+
   // A Skip or Applied click removes its card on refresh, so the undo lives here.
   useEffect(() => {
     if (!decisionUndo || decisionUndo.busy || decisionUndo.error) return;
@@ -186,6 +196,8 @@ export function TodayDashboard({
     { kind: "follow-up", due: true, count: shown.overdue },
     { kind: "match", due: false, count: shown.newThisWeek },
   ]).filter((item) => item.count > 0);
+
+  if (!settled) return <TodayPageSkeleton />;
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
