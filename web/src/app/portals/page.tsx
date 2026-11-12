@@ -1,5 +1,6 @@
 import { Radar } from "lucide-react";
 import path from "node:path";
+import { AddCompany } from "@/components/add-company";
 import { PortalsView } from "@/components/portals-view";
 import { careerOpsRoot, portalsConfigPath } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
@@ -40,6 +41,11 @@ export default function PortalsPage() {
         <p role="alert" className="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-600 dark:text-rose-400">
           Could not read <code>portals.yml</code>: {error}
         </p>
+      )}
+      {!missing && !error && (
+        <div className="mt-6">
+          <AddCompany />
+        </div>
       )}
       <div className="mt-6">
         <PortalsView watched={watched} missing={missing} target={target} />
