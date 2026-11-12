@@ -137,6 +137,12 @@ CLI=claude
 RATE_LIMIT_SLEEP=300
 WORKER_TIMEOUT=1800
 THIN_ACTION=webfetch   # webfetch | skip | browser-extract: what to do when the JD is still empty after the prefetch and the ATS API fallback
+PRESCREEN=true         # zero-token rule gate (prescreen.mjs) before any model call
+TRIAGE_MODE=""         # auto | on | off: economy-model triage pass; empty = profile pipeline.triage, else auto
+TRIAGE_ENABLED=false
+TRIAGE_MODEL=""
+TRIAGE_THRESHOLD=""
+MAX_YEARS=""
 BATCH_PAUSED=false
 EVIDENCE_FRESHNESS_JSON=""   # set once per run by check_evidence_freshness
 STATUS_ONLY=false
@@ -165,8 +171,16 @@ Options:
                        the spend_tier in config/profile.yml, or in the file
                        CAREER_OPS_PROFILE names: economy/standard/premium;
                        default standard).
-  --parallel N         Number of parallel workers (default: 3 for claude, 1 otherwise).
+  --parallel N         Number of parallel workers (default: pipeline.parallel in
+                       config/profile.yml, else 3 for claude, 1 otherwise).
                        On a rate limit, the rest of the batch runs on 1 worker.
+  --no-prescreen       Skip the zero-token rule gate (prescreen.mjs: blacklist,
+                       vetoed title, years above pipeline.prescreen.max_years)
+  --triage MODE        Economy-model triage pass before the full evaluation:
+                       'auto' (default: on for claude at the standard/premium
+                       tier when modes/_brief.md is filled in), 'on' or 'off'.
+                       FAIL and MARGINAL skip the offer; PASS, an unreadable JD
+                       or a failed call fall through to the full evaluation
   --dry-run            Show what would be processed, don't execute
   --retry-failed       Only retry offers marked as "failed" in state
   --resume-paused      Resume offers paused by a Claude session/rate limit
@@ -276,6 +290,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --model) MODEL="$2"; shift 2 ;;
+    --no-prescreen) PRESCREEN=false; shift ;;
+    --triage)
+      [[ $# -ge 2 ]] || { echo "ERROR: --triage requires an argument (auto, on or off)"; exit 1; }
+      case "$2" in
+        auto|on|off) TRIAGE_MODE="$2" ;;
+        *) echo "ERROR: --triage must be 'auto', 'on' or 'off' (got '$2')."; exit 1 ;;
+      esac
+      shift 2
+      ;;
     --thin-action)
       [[ $# -ge 2 ]] || { echo "ERROR: --thin-action requires an argument (skip, webfetch or browser-extract)"; exit 1; }
       case "$2" in
@@ -334,6 +357,20 @@ if [[ "$MODE" == "match" ]]; then
   [[ -n "$MATCH_OUTPUT_LANGUAGE" ]] || MATCH_OUTPUT_LANGUAGE="en"
 fi
 
+# Pre-screen settings from the profile (pipeline.parallel, pipeline.triage,
+# pipeline.triage_threshold, pipeline.prescreen.max_years), read once through
+# prescreen.mjs so YAML is parsed by the same reader as everywhere else.
+PRESCREEN_CONFIG=""
+if [[ -f "$PROJECT_DIR/prescreen.mjs" ]]; then
+  PRESCREEN_CONFIG="$(node "$PROJECT_DIR/prescreen.mjs" --config 2>/dev/null)" || PRESCREEN_CONFIG=""
+fi
+prescreen_config_value() {
+  printf '%s\n' "$PRESCREEN_CONFIG" | awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); sub(/\r$/, ""); print; exit }'
+}
+
+if [[ -z "$PARALLEL" ]]; then
+  PARALLEL="$(prescreen_config_value PARALLEL)"
+fi
 if [[ -z "$PARALLEL" ]]; then
   if [[ "$CLI" == "claude" ]]; then PARALLEL=$DEFAULT_CLAUDE_PARALLEL; else PARALLEL=1; fi
 fi
@@ -787,6 +824,58 @@ resolve_worker_model() {
 
   RESOLVED_SPEND_TIER="$(read_spend_tier)"
   RESOLVED_MODEL="$(spend_tier_to_model "$RESOLVED_SPEND_TIER")"
+}
+
+# Decide whether the economy-model triage pass runs (modes/batch.md —
+# Pre-screen gate). 'auto' runs it for claude at the standard/premium tier:
+# at the economy tier the full evaluation already runs on that model. 'on'
+# also runs it for an explicit --model. Either way it needs a filled-in
+# modes/_brief.md, and full mode (match mode is already a single cheap pass).
+resolve_triage() {
+  MAX_YEARS="$(prescreen_config_value MAX_YEARS)"
+  TRIAGE_THRESHOLD="$(prescreen_config_value TRIAGE_THRESHOLD)"
+  local mode="${TRIAGE_MODE:-$(prescreen_config_value TRIAGE)}"
+  mode="${mode:-auto}"
+  TRIAGE_ENABLED=false
+  TRIAGE_MODEL="$(spend_tier_to_model economy)"
+  [[ "$mode" == "off" ]] && return 0
+  if [[ "$CLI" != "claude" || "${MODE:-full}" != "full" ]]; then
+    [[ "$mode" == "on" ]] && echo "WARN: --triage on needs --cli claude and --mode full; triage is off for this run." >&2
+    return 0
+  fi
+  if [[ "$mode" == "auto" && "$RESOLVED_SPEND_TIER" != "standard" && "$RESOLVED_SPEND_TIER" != "premium" ]]; then
+    return 0
+  fi
+  if [[ "$(prescreen_config_value TRIAGE_READY)" != "1" ]]; then
+    if [[ "$mode" == "on" ]]; then
+      local why
+      why="$(prescreen_config_value TRIAGE_NOT_READY_REASON)"
+      echo "WARN: triage pass is off: ${why:-modes/_brief.md could not be read}." >&2
+    fi
+    return 0
+  fi
+  TRIAGE_ENABLED=true
+}
+
+# One economy-model triage pass (modes/triage.md) over a JD already on disk.
+# Prints "VERDICT<TAB>SCORE<TAB>REASON", or nothing when the call failed or
+# returned no TRIAGE line. The worker runs from an empty temp directory so it
+# loads no project CLAUDE.md (the triage prompt carries all it needs), with
+# every tool disabled and no MCP servers. The raw output goes to $3.
+run_triage() {
+  local url="$1" jd_file="$2" triage_log="$3"
+  local prompt_file triage_cwd
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/batch-triage-prompt.XXXXXX")"
+  if ! node "$PROJECT_DIR/prescreen.mjs" --triage-prompt --url "$url" --jd-file "$jd_file" > "$prompt_file" 2>/dev/null; then
+    rm -f "$prompt_file"
+    return 0
+  fi
+  triage_cwd="$(mktemp -d "${TMPDIR:-/tmp}/batch-triage-cwd.XXXXXX")"
+  local -a timeout_cmd=()
+  command -v timeout >/dev/null 2>&1 && timeout_cmd=(timeout 300)
+  ( cd "$triage_cwd" && ${timeout_cmd[@]+"${timeout_cmd[@]}"} claude -p --model "$TRIAGE_MODEL" --strict-mcp-config --tools "" < "$prompt_file" ) > "$triage_log" 2>&1 || true
+  rm -rf "$prompt_file" "$triage_cwd"
+  node "$PROJECT_DIR/prescreen.mjs" --parse-triage < "$triage_log" 2>/dev/null || true
 }
 
 
@@ -1520,6 +1609,55 @@ process_offer() {
     release_report_num "$report_num"
     rm -f "$jd_file"
     echo "    🚫 $jd_thin_note — no worker spawned"
+    return 0
+  fi
+
+  # Pre-screen gate (modes/batch.md). Rules first, zero tokens: blacklist,
+  # vetoed title, years above pipeline.prescreen.max_years (prescreen.mjs,
+  # exit 2 = skip). Then the economy-model triage pass over the same JD file.
+  # Either one skipping ends the offer here with an auditable discard-log
+  # line. Every failure of the gate itself falls through to the full
+  # evaluation: a broken gate must never cost a real job.
+  local gate_reason=""
+  if [[ "$PRESCREEN" == "true" && -f "$PROJECT_DIR/prescreen.mjs" ]]; then
+    local ps_out="" ps_code=0
+    ps_out="$(node "$PROJECT_DIR/prescreen.mjs" --url "$url" --jd-file "$jd_file" 2>/dev/null)" || ps_code=$?
+    if [[ "$ps_code" -eq 2 ]]; then
+      gate_reason="prescreen: ${ps_out#SKIP$'\t'}"
+    elif [[ "$ps_code" -eq 0 ]]; then
+      echo "    ✅ Pre-screen rules: pass (${ps_out##*$'\t'})"
+    fi
+  fi
+  if [[ -z "$gate_reason" && "$TRIAGE_ENABLED" == "true" ]]; then
+    if [[ -s "$jd_file" ]]; then
+      local triage_line="" t_verdict="" t_score="" t_reason=""
+      mkdir -p "$LOGS_DIR"
+      triage_line="$(run_triage "$url" "$jd_file" "$LOGS_DIR/triage-${id}.log")"
+      IFS=$'\t' read -r t_verdict t_score t_reason <<< "$triage_line"
+      case "$t_verdict" in
+        FAIL|MARGINAL)
+          gate_reason="triage ${t_verdict} ${t_score:-?}/5: ${t_reason}"
+          ;;
+        PASS)
+          echo "    ✅ Triage (${TRIAGE_MODEL}): PASS ${t_score:-?}/5"
+          ;;
+        *)
+          echo "    ℹ️  Triage gave no verdict${t_verdict:+ ($t_verdict)} — full evaluation decides (see logs/triage-${id}.log)"
+          ;;
+      esac
+    else
+      echo "    ℹ️  Triage skipped: no JD text on disk yet — full evaluation decides"
+    fi
+  fi
+  if [[ -n "$gate_reason" ]]; then
+    local gate_now
+    gate_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    gate_reason="${gate_reason//$'\t'/ }"
+    update_state_retrying "$id" "$url" "skipped" "$started_at" "$gate_now" "-" "-" "$gate_reason" "$retries" || true
+    log_discard "$id" "$url" "$gate_reason"
+    release_report_num "$report_num"
+    rm -f "$jd_file"
+    echo "    🚫 Pre-screen: $gate_reason — no worker spawned"
     return 0
   fi
 
@@ -2320,6 +2458,7 @@ main() {
   check_prerequisites
 
   resolve_worker_model
+  resolve_triage
 
   if [[ "$DRY_RUN" == "false" ]]; then
     acquire_lock
@@ -2358,6 +2497,14 @@ main() {
     echo "CLI: $CLI | Model: $CLI default"
   else
     echo "CLI: $CLI | Model: $RESOLVED_MODEL (spend_tier=${RESOLVED_SPEND_TIER})"
+  fi
+  if [[ "$PRESCREEN" == "true" && -f "$PROJECT_DIR/prescreen.mjs" ]]; then
+    echo "Pre-screen rules: on${MAX_YEARS:+ (skip JDs asking more than $MAX_YEARS years)}"
+  else
+    echo "Pre-screen rules: off"
+  fi
+  if [[ "$TRIAGE_ENABLED" == "true" ]]; then
+    echo "Triage: on ($TRIAGE_MODEL, PASS at ${TRIAGE_THRESHOLD:-3.5}/5)"
   fi
   echo "Input: $total_input offers"
   echo ""

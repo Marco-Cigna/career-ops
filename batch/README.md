@@ -32,7 +32,9 @@ Process multiple job offers via headless workers. By default (`--mode full`) eac
 |------|---------|-------------|
 | `--cli NAME` | `claude` | Worker CLI: `claude`, `opencode`, `gemini`, `qwen` or `grok`. Only `claude` runs in parallel and retries; the others run one offer at a time, one attempt each |
 | `--model NAME` | per CLI | Model for the worker CLI. For `claude`, overrides the model resolved from `spend_tier` in `config/profile.yml` |
-| `--parallel N` | `3` for `claude`, `1` otherwise | Number of concurrent headless workers; after a rate limit the rest of the batch runs on 1 |
+| `--parallel N` | `pipeline.parallel` in `config/profile.yml`, else `3` for `claude`, `1` otherwise | Number of concurrent headless workers; after a rate limit the rest of the batch runs on 1 |
+| `--no-prescreen` | off | Skip the zero-token rule gate (`prescreen.mjs`: blacklist, `title_filter.negative`, years above `pipeline.prescreen.max_years`) that runs before any worker |
+| `--triage MODE` | `auto` (or `pipeline.triage`) | Economy-model triage pass (`modes/triage.md` + `modes/_brief.md` + the JD, no tools) before the full evaluation. `auto`: on for `claude` at the standard/premium tier when `modes/_brief.md` is filled in. FAIL and MARGINAL are recorded as `skipped` in state and in `logs/discard.log`; PASS, an unreadable JD or a failed call go to the full evaluation. Raw answers in `logs/triage-{id}.log` |
 | `--dry-run` | off | Preview pending offers without processing |
 | `--retry-failed` | off | Only retry offers marked as `failed` in state |
 | `--resume-paused` | off | Resume offers paused after a Claude session/rate limit |
