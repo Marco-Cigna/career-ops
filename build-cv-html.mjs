@@ -70,6 +70,7 @@ const DEFAULT_SECTION_TITLES = {
   summary: 'Professional Summary',
   competencies: 'Core Competencies',
   experience: 'Work Experience',
+  additional_experience: 'Additional Experience',
   projects: 'Projects',
   education: 'Education',
   certifications: 'Certifications',
@@ -93,11 +94,6 @@ function escapeHtml(text) {
   // numeric years/dates from the CV while `present` stayed true.
   if (text === null || text === undefined || typeof text === 'object') return '';
   return String(text)
-    // Payload text is plain text. article-digest.md and cv.md are Markdown, and a
-    // tailoring pass that copies a bolded metric ("**85%**") carries the markers
-    // into the CV, where they print as literal asterisks. Drop the pair, keep
-    // the words. A lone "**" (2**10) is left alone.
-    .replace(/\*\*(?=\S)([^*\n]*?\S)\*\*/g, '$1')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -805,6 +801,9 @@ function renderReport(payload, partials) {
     COMPETENCIES: buildCompetencies(payload.competencies, partials.get('competencies')),
     SECTION_EXPERIENCE: escapeHtml(sectionTitles.experience),
     EXPERIENCE: buildExperience(payload.experience, partials.get('experience')),
+    // Same markup as the main history; only its place and title differ.
+    SECTION_ADDITIONAL_EXPERIENCE: escapeHtml(sectionTitles.additional_experience),
+    ADDITIONAL_EXPERIENCE: buildExperience(payload.additional_experience, partials.get('experience')),
     SECTION_PROJECTS: escapeHtml(sectionTitles.projects),
     PROJECTS: buildProjects(payload.projects, partials.get('projects')),
     SECTION_EDUCATION: escapeHtml(sectionTitles.education),
@@ -949,6 +948,7 @@ function mdUrl(url) {
 // footer only where the template has one.
 const HTML_SECTION_SLOTS = {
   summary: 'SUMMARY_TEXT', competencies: 'COMPETENCIES', experience: 'EXPERIENCE',
+  additional_experience: 'ADDITIONAL_EXPERIENCE',
   projects: 'PROJECTS', education: 'EDUCATION', certifications: 'CERTIFICATIONS',
   awards: 'AWARDS', interests: 'INTERESTS', skills: 'SKILLS', consent: 'CONSENT',
 };
@@ -993,17 +993,21 @@ function renderMarkdown(payload, template) {
   const tags = list(payload.competencies).filter(Boolean).map(mdLine);
   if (tags.length) section('competencies', [tags.join(', '), '']);
 
-  const exp = [];
-  for (const e of list(payload.experience).filter(e => hasRequiredFields(e, 'experience', 'html'))) {
-    exp.push(`### ${mdJoin([e.company, e.role], ' — ')}`, '');
-    const meta = mdJoin([e.location, e.dates || e.period], ' · ');
-    if (meta) exp.push(`*${meta}*`, '');
-    if (mdLine(e.context)) exp.push(mdLine(e.context), '');
-    const bullets = list(e.bullets).filter(Boolean);
-    for (const b of bullets) exp.push(`- ${mdLine(b)}`);
-    if (bullets.length) exp.push('');
-  }
-  section('experience', exp);
+  const history = (key) => {
+    const exp = [];
+    for (const e of list(payload[key]).filter(e => hasRequiredFields(e, key, 'html'))) {
+      exp.push(`### ${mdJoin([e.company, e.role], ' — ')}`, '');
+      const meta = mdJoin([e.location, e.dates || e.period], ' · ');
+      if (meta) exp.push(`*${meta}*`, '');
+      if (mdLine(e.context)) exp.push(mdLine(e.context), '');
+      const bullets = list(e.bullets).filter(Boolean);
+      for (const b of bullets) exp.push(`- ${mdLine(b)}`);
+      if (bullets.length) exp.push('');
+    }
+    section(key, exp);
+  };
+  history('experience');
+  history('additional_experience');
 
   const proj = [];
   for (const e of list(payload.projects).filter(e => hasRequiredFields(e, 'projects', 'html'))) {

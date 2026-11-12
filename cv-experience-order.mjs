@@ -167,7 +167,22 @@ function jobPeriodContents(html) {
  */
 export function validateCvExperienceOrder(html, { allowNonChronological = false } = {}) {
   if (typeof html !== 'string') return;
+  // An Additional Experience section (cv-sections-core.mjs) is its own list: it
+  // sits after the main history on purpose, so its roles are checked against
+  // each other, never against the roles above them.
+  const additional = html.match(ADDITIONAL_SECTION_RE);
+  if (additional) {
+    checkOrder(html.replace(ADDITIONAL_SECTION_RE, ''), allowNonChronological);
+    checkOrder(additional[0], allowNonChronological);
+    return;
+  }
+  checkOrder(html, allowNonChronological);
+}
 
+// The same marker and boundary cv-sections-core.mjs strips the section with.
+const ADDITIONAL_SECTION_RE = /<!--\s+ADDITIONAL EXPERIENCE\s+-->[\s\S]*?(?=<!--\s+[A-Z][A-Z ]*-->|$)/;
+
+function checkOrder(html, allowNonChronological) {
   const entries = [];
   for (const content of jobPeriodContents(html)) {
     // Strip tags to a fixed point: one pass can leave text that re-forms a

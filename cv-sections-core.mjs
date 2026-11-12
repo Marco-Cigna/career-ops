@@ -129,6 +129,7 @@ const PATTERNS = {
     summary: new RegExp(String.raw`<!--\s+PROFESSIONAL SUMMARY\s+-->[\s\S]*?` + HTML_SECTION_ONLY),
     competencies: new RegExp(String.raw`<!--\s+CORE COMPETENCIES\s+-->[\s\S]*?` + HTML_BOUNDARY),
     experience: new RegExp(String.raw`<!--\s+WORK EXPERIENCE\s+-->[\s\S]*?` + HTML_BOUNDARY),
+    additional_experience: new RegExp(String.raw`<!--\s+ADDITIONAL EXPERIENCE\s+-->[\s\S]*?` + HTML_BOUNDARY),
     projects: new RegExp(String.raw`<!--\s+PROJECTS\s+-->[\s\S]*?` + HTML_BOUNDARY),
     education: new RegExp(String.raw`<!--\s+EDUCATION\s+-->[\s\S]*?` + HTML_BOUNDARY),
     certifications: new RegExp(String.raw`<!--\s+CERTIFICATIONS\s+-->[\s\S]*?` + HTML_BOUNDARY),
@@ -147,7 +148,7 @@ const PATTERNS = {
   },
 };
 
-export const OPTIONAL_SECTIONS = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
+export const OPTIONAL_SECTIONS = ['summary', 'competencies', 'experience', 'additional_experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
 
 // Sections whose payload value is text rather than a list of entries.
 const TEXT_SECTIONS = new Set(['summary']);
