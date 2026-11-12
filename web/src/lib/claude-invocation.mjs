@@ -281,3 +281,23 @@ export function claudeTriageArgs({ model }) {
     "--disallowedTools", scopeFrom("").disallowed,
   ];
 }
+
+/**
+ * The argv for a web-search-only agent (the Portals page's company search). It
+ * reads the open web, so it gets WebFetch and WebSearch and nothing that can
+ * touch a file; its answer is validated before anything is written.
+ *
+ * @param {{prompt: string, model: string}} args
+ * @returns {string[]}
+ */
+export function claudeWebSearchArgs({ prompt, model }) {
+  const scope = scopeFrom("WebFetch,WebSearch");
+  return [
+    "-p", prompt,
+    "--model", model,
+    "--permission-mode", "acceptEdits",
+    "--strict-mcp-config",
+    "--allowedTools", scope.allowed,
+    "--disallowedTools", scope.disallowed,
+  ];
+}

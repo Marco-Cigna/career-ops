@@ -103,6 +103,10 @@ async function post(base, body) {
 }
 
 async function main() {
+  if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    console.log(USAGE);
+    return 0;
+  }
   let opts;
   try {
     opts = parseArgs(process.argv.slice(2));

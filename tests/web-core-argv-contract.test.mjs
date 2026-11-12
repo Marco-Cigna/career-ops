@@ -175,6 +175,59 @@ const CALL_SITES = [
     args: [],
     probe: 'none',
   },
+  {
+    // The dashboard's cost gate reads the spend tier and pipeline block.
+    source: 'web/src/lib/core-cli.ts',
+    argvSource: 'web/src/lib/pipeline-gate-run.ts',
+    script: 'prescreen.mjs',
+    args: ['--config'],
+    probe: 'run',
+  },
+  {
+    // Both prescreen argv shapes pipeline-gate.mjs builds, flag names only:
+    // the real run reads a posting.
+    source: 'web/src/lib/core-cli.ts',
+    argvSource: 'web/src/lib/pipeline-gate.mjs',
+    script: 'prescreen.mjs',
+    args: ['--input', 'in.json', '--log', 'discard.log', '--json', '--jd-file', 'jd.txt', '--triage-prompt'],
+    probe: 'flags-only',
+  },
+  {
+    // "Add a company" on the Portals page. --write would edit portals.yml and
+    // the lookup probes live boards, so flag names only.
+    source: 'web/src/lib/core-script-long.ts',
+    argvSource: 'web/src/app/api/portals/discover/route.ts',
+    script: 'discover-ats.mjs',
+    args: ['--in', 'companies.yml', '--write'],
+    probe: 'flags-only',
+  },
+  // The Tools page: each catalog entry's fixed argv (web/src/lib/tools-catalog.mjs).
+  // Flag names only, because three of them rewrite the tracker and one sweeps
+  // every watched board.
+  ...[
+    ['stats.mjs', ['--summary']],
+    ['funnel-velocity.mjs', ['--summary']],
+    ['closing-soon.mjs', ['--summary']],
+    ['reeval-candidates.mjs', ['--summary']],
+    ['detect-reposts.mjs', ['--summary']],
+    ['salary-gap.mjs', ['--summary']],
+    ['discard-analytics.mjs', []],
+    ['filter-audit.mjs', ['--summary']],
+    ['rejection-latency.mjs', ['--summary']],
+    ['verify-pipeline.mjs', []],
+    ['doctor.mjs', []],
+    ['check-jd-archive.mjs', ['--summary']],
+    ['audit-portals.mjs', ['--summary']],
+    ['merge-tracker.mjs', []],
+    ['dedup-tracker.mjs', []],
+    ['normalize-statuses.mjs', []],
+  ].map(([script, args]) => ({
+    source: 'web/src/lib/core-script-long.ts',
+    argvSource: 'web/src/lib/tools-catalog.mjs',
+    script,
+    args,
+    probe: 'flags-only',
+  })),
 ];
 
 /**

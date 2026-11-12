@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TIER_MODELS, modelForRun, parseTriage, pipelineSettings, runPipelineGate, triageEnabled } from "../../src/lib/pipeline-gate.mjs";
-import { claudeCliArgs, claudeTriageArgs, verifyClaudeArgs, argValue } from "../../src/lib/claude-invocation.mjs";
+import { claudeCliArgs, claudeTriageArgs, claudeWebSearchArgs, verifyClaudeArgs, argValue } from "../../src/lib/claude-invocation.mjs";
 import { createRunQueue } from "../../src/lib/run-queue.mjs";
 
 const CONFIG = "PARALLEL=1\nTRIAGE=auto\nTRIAGE_THRESHOLD=3.5\nTRIAGE_READY=1\nMAX_YEARS=5\nSPEND_TIER=standard\n";
@@ -127,4 +127,10 @@ test("the run queue runs several at once when the limit allows", async () => {
   };
   await Promise.all([job(), job(), job(), job()]);
   assert.equal(peak, 2);
+});
+
+test("the company-search argv reaches the web and nothing else", () => {
+  const args = claudeWebSearchArgs({ prompt: "p", model: TIER_MODELS.economy });
+  assert.equal(argValue(args, "--allowedTools"), "WebFetch,WebSearch");
+  assert.doesNotThrow(() => verifyClaudeArgs(args, { writes: false, network: "fetch" }));
 });

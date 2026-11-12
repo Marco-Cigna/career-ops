@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { rootScript } from "@/lib/career-ops";
 import { runCoreScriptLong } from "@/lib/core-script-long";
 import { resolveCliOrFallback } from "@/lib/clis";
-import { scopeFrom } from "@/lib/claude-invocation.mjs";
+import { claudeWebSearchArgs } from "@/lib/claude-invocation.mjs";
 import { readJsonObject } from "@/lib/json-body";
 import { TIER_MODELS } from "@/lib/pipeline-gate.mjs";
 import { agentPrompt, companyName, discoveryInput, readAgentAnswer, readDiscovery, safeHints, type Discovery } from "@/lib/portal-discovery.mjs";
@@ -18,9 +18,6 @@ export const maxDuration = 300;
 
 const LOOKUP_TIMEOUT_MS = 90_000;
 const AGENT_TIMEOUT_MS = 180_000;
-// Web search and page fetches only: the agent reads the open web, so it gets no
-// file or shell tool, and its answer is validated before anything is written.
-const AGENT_SCOPE = scopeFrom("WebFetch,WebSearch");
 
 /** Run discover-ats.mjs on one company. Preview unless `write`. */
 function lookup(name: string, hints: Record<string, unknown>, write: boolean): Promise<Discovery> {
@@ -85,7 +82,7 @@ export async function POST(req: Request) {
   const { spec, binPath } = resolved;
   const prompt = agentPrompt(name);
   const args = spec.id === "claude"
-    ? ["-p", prompt, "--model", TIER_MODELS.economy, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", AGENT_SCOPE.allowed, "--disallowedTools", AGENT_SCOPE.disallowed]
+    ? claudeWebSearchArgs({ prompt, model: TIER_MODELS.economy })
     : spec.args(prompt);
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-agent-"));
   let answer = "";
