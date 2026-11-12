@@ -7,6 +7,10 @@ import { computeProgressMetrics, computeStatsMetrics, generateInsights, resolveA
 import { AnalyticsShell, ProgressPanel, StatsPanel } from "@/components/analytics-view";
 import { FunnelRates } from "@/components/analytics/funnel-rates";
 import { SearchInsights } from "@/components/analytics/search-insights";
+import { ApplicationActivityPanel } from "@/components/analytics/application-activity-panel";
+import { computeApplicationActivity } from "@/lib/application-activity.mjs";
+import { readActivityGoals } from "@/lib/application-activity-data";
+import { localISODate } from "@/lib/followups";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +35,15 @@ async function ProgressView({ applications }: { applications: Application[] }) {
     applications.map((app) => ({ n: app.n, status: canonStatus(app.status) })),
     readApplicationStatusLog(),
   );
+  const activity = computeApplicationActivity({
+    applications,
+    statusLog: readStatusLog(),
+    today: localISODate(),
+    goals: readActivityGoals(),
+  });
   return (
     <>
+      <ApplicationActivityPanel activity={activity} />
       <ProgressPanel metrics={computeProgressMetrics(applications, achievements)} />
       <PipelineSankey applications={applications} statusLog={readStatusLog()} />
       <FunnelRates />

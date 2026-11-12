@@ -62,6 +62,10 @@
   --brand-text: hsl(26 80% 36%); /* darkened brand for small text: 5.5 white / 5.1 cream / 4.7 surface-hover */
   --dot: 40 8% 42% / 0.09;
   --pre-bg: #f2f1ed;
+  /* Two-series chart pair, validated with the dataviz palette checks against
+     #ffffff (light) and #161616 (dark): applications, responses. */
+  --series-1: #dd7627;
+  --series-2: #0284c7;
   color-scheme: light;
 }
 
@@ -78,6 +82,8 @@
     --brand-text: hsl(26 73% 51%); /* raw brand already passes in dark (≥4.95 on bg/surface) */
     --dot: 240 5% 65% / 0.10;
     --pre-bg: #111111;
+    --series-1: #d36d22;
+    --series-2: #0284c7;
     color-scheme: dark;
   }
 }

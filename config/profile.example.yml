@@ -413,6 +413,15 @@ cover_letter:
 # generate a PDF for every offer.
 # auto_pdf_score_threshold: 4.0
 
+# ── Application goals ─────────────────────────────────────────────────────
+#
+# Optional. The dashboard's Analytics → Search progress page shows your
+# applications this calendar year and in the last 30 days against these.
+# goals:
+#   applications_per_year: 250
+#   applications_per_30_days: 30
+
+
 # ── Two-pass triage gate ────────────────────────────────────────────────────
 #
 # Used by `/career-ops pipeline`. Before running the full A-G evaluation on

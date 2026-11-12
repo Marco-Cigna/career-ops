@@ -73,7 +73,7 @@ function fallbackLocation(text: string): string {
   // a bare `City ST` shape turns "Best Technical Fit IN" into Indiana.
   const cityState = text.match(/\b([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+){0,2}),\s*(?:A[KLRZ]|C[AOT]|D[CE]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\b/);
   if (cityState?.[1] && !(cityState[1].length <= 3 && cityState[1] === cityState[1].toUpperCase())) return cityState[1];
-  const cities = text.match(/\b(Porto|Lisbon|London|Berlin|Munich|München|Hamburg|Frankfurt|Cologne|Düsseldorf|Dusseldorf|Stuttgart|Zurich|Zürich|Geneva|Lausanne|Basel|Dublin|Cork|Amsterdam|Rotterdam|Eindhoven|Utrecht|Paris|Lyon|Madrid|Barcelona|Valencia|Stockholm|Gothenburg|Malmö|Malmo|Copenhagen|Oslo|Helsinki|Milan|Rome|Turin|Vienna|Brussels|Ghent|Antwerp|Luxembourg|Warsaw|Kraków|Krakow|Wrocław|Wroclaw|Tallinn|Riga|Vilnius|Prague|Brno|Budapest|Bucharest|Sofia|Athens|Bengaluru|Bangalore|Singapore|Sydney|Toronto|Vancouver|Tel Aviv|São Paulo|Sao Paulo|Kuala Lumpur|Petaling Jaya|Cyberjaya)\b/i);
+  const cities = text.match(/\b(Porto|Lisbon|London|Berlin|Munich|München|Hamburg|Frankfurt|Cologne|Düsseldorf|Dusseldorf|Stuttgart|Zurich|Zürich|Geneva|Lausanne|Basel|Dublin|Cork|Amsterdam|Rotterdam|Eindhoven|Utrecht|Paris|Lyon|Madrid|Barcelona|Valencia|Stockholm|Gothenburg|Malmö|Malmo|Copenhagen|Oslo|Helsinki|Milan|Rome|Turin|Vienna|Brussels|Ghent|Antwerp|Luxembourg|Warsaw|Kraków|Krakow|Wrocław|Wroclaw|Tallinn|Riga|Vilnius|Prague|Brno|Budapest|Bucharest|Sofia|Athens|Bengaluru|Bangalore|Singapore|Sydney|Melbourne|Brisbane|Perth|Adelaide|Canberra|Hobart|Auckland|Wellington|The Hague|Toronto|Vancouver|Tel Aviv|São Paulo|Sao Paulo|Kuala Lumpur|Petaling Jaya|Cyberjaya)\b/i);
   return cities?.[1] ?? "";
 }
 

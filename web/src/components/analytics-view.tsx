@@ -182,11 +182,11 @@ export function StatsPanel({ metrics, insights }: { metrics: StatsMetrics; insig
   );
 }
 
-function Panel({ eyebrow, title, description, icon, children }: { eyebrow: string; title: string; description?: string; icon?: React.ReactNode; children: React.ReactNode }) {
+export function Panel({ eyebrow, title, description, icon, children }: { eyebrow: string; title: string; description?: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return <section className="rounded-2xl border border-border bg-surface/55 p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div><p className="flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-[0.17em] text-brand-text">{icon}{eyebrow}</p><h2 className="mt-2 font-display text-xl tracking-tight text-landing">{title}</h2>{description && <p className="mt-1 max-w-xl text-xs leading-5 text-muted">{description}</p>}</div></div>{children}</section>;
 }
 
-function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
+export function MetricCard({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
   return <div className="rounded-xl border border-border bg-surface/45 p-4"><div className="flex items-center justify-between text-brand-text"><span className="font-mono text-[10px] font-semibold uppercase tracking-[0.15em] text-muted">{label}</span>{icon}</div><div className="mt-3 font-display text-3xl tracking-tight text-landing tabular-nums">{value}</div></div>;
 }
 
@@ -199,7 +199,7 @@ function RateRow({ label, value }: { label: string; value: number | null }) {
   return <div className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0 xl:first:pt-0"><span className="text-sm text-muted">{label} rate</span><span className="font-mono text-lg font-semibold tabular-nums text-foreground" title={absent ? NO_RATE_EXPLANATION : undefined}>{absent ? <><span aria-hidden="true">—</span><span className="sr-only">{NO_RATE_EXPLANATION}</span></> : `${value.toFixed(1)}%`}</span></div>;
 }
 
-function BarRow({ label, count, pct, widthPct, tone }: { label: string; count: number; pct?: number; widthPct: number; tone: string }) {
+export function BarRow({ label, count, pct, widthPct, tone }: { label: string; count: number; pct?: number; widthPct: number; tone: string }) {
   const accessibleValue = pct === undefined ? `${label}: ${count}` : `${label}: ${count}, ${Math.round(pct)} percent`;
   return <div className="grid grid-cols-[minmax(94px,0.45fr)_minmax(80px,1fr)_auto] items-center gap-3"><span className="break-words text-xs text-muted" title={label}>{label}</span><div className="h-2 overflow-hidden rounded-full bg-surface-hover" role="img" aria-label={accessibleValue}><div className={`h-full rounded-full ${tone} transition-[width] duration-500`} style={{ width: `${Math.min(100, Math.max(0, widthPct))}%` }} /></div><span className="min-w-16 text-right font-mono text-xs tabular-nums text-foreground">{count}{pct === undefined ? null : <> <span className="text-faint">({Math.round(pct)}%)</span></>}</span></div>;
 }
@@ -209,11 +209,11 @@ function Distribution({ rows, emptyLabel = "No distribution data" }: { rows: { l
   return <div className="mt-5"><div className="flex h-3 overflow-hidden rounded-full bg-surface-hover" aria-hidden="true">{rows.map((row, index) => <div key={row.label} className={BAR_TONES[index % BAR_TONES.length]} style={{ width: `${row.pct}%` }} />)}</div><div className="mt-4 grid gap-2 sm:grid-cols-2">{rows.map((row, index) => <div key={row.label} className="flex items-center gap-2 text-xs"><span className={`size-2 rounded-full ${BAR_TONES[index % BAR_TONES.length]}`} aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-muted">{row.label}</span><span className="font-mono tabular-nums text-foreground">{row.count} <span className="text-faint">({Math.round(row.pct)}%)</span></span></div>)}</div></div>;
 }
 
-function BreakdownList({ rows, icon, emptyLabel }: { rows: { label: string; count: number; pct: number }[]; icon: React.ReactNode; emptyLabel: string }) {
+export function BreakdownList({ rows, icon, emptyLabel }: { rows: { label: string; count: number; pct: number }[]; icon: React.ReactNode; emptyLabel: string }) {
   if (!rows.length) return <EmptyData label={emptyLabel} detail="Add an explicit work mode or location to the tracker notes to populate this dimension." />;
   return <div className="mt-4 space-y-3">{rows.map((row, index) => <div key={row.label} className="flex items-center gap-2 text-sm"><span className="text-brand-text">{icon}</span><span className="min-w-0 flex-1 break-words text-muted">{row.label}</span><span className="font-mono text-xs tabular-nums text-foreground">{row.count}</span><span className="w-12 text-right font-mono text-[11px] tabular-nums text-faint">{Math.round(row.pct)}%</span></div>)}</div>;
 }
 
 function PayStat({ label, value }: { label: string; value: string | number }) { return <div><p className="text-[11px] text-faint">{label}</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">{value}</p></div>; }
-function EmptyData({ label, detail }: { label: string; detail: string }) { return <div className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 px-4 py-6 text-center"><p className="font-display text-lg text-landing">{label}</p><p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted">{detail}</p></div>; }
+export function EmptyData({ label, detail }: { label: string; detail: string }) { return <div className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 px-4 py-6 text-center"><p className="font-display text-lg text-landing">{label}</p><p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted">{detail}</p></div>; }
 function money(value: number) { return value ? `$${Math.round(value / 1000)}K` : "—"; }
