@@ -1,10 +1,9 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { rootScript } from "@/lib/career-ops";
-import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { runCoreScriptLong } from "@/lib/core-script-long";
 import { resolveCliOrFallback } from "@/lib/clis";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -28,20 +27,12 @@ function lookup(name: string, hints: Record<string, unknown>, write: boolean): P
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-discover-"));
   const file = path.join(dir, "companies.yml");
   fs.writeFileSync(file, discoveryInput(name, hints));
-  return new Promise((resolve) => {
-    execFile(
-      process.execPath,
-      [rootScript("discover-ats"), "--in", file, ...(write ? ["--write"] : [])],
-      { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: LOOKUP_TIMEOUT_MS, env: process.env, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-      (err, stdout) => {
-        fs.rmSync(dir, { recursive: true, force: true });
-        const killed = (err as { killed?: boolean } | null)?.killed === true;
-        if (killed) return resolve({ status: "error", reason: "The board lookup timed out. Try again." });
-        // discover-ats exits non-zero when nothing resolved; its JSON still says why.
-        resolve(readDiscovery(stdout || ""));
-      },
-    );
-  });
+  return runCoreScriptLong("discover-ats", ["--in", file, ...(write ? ["--write"] : [])], LOOKUP_TIMEOUT_MS)
+    .then((run): Discovery => {
+      // discover-ats exits non-zero when nothing resolved; its JSON still says why.
+      return run.timedOut ? { status: "error", reason: "The board lookup timed out. Try again." } : readDiscovery(run.stdout);
+    })
+    .finally(() => fs.rmSync(dir, { recursive: true, force: true }));
 }
 
 /** One web-search agent run. Resolves to its final text, "" on any failure. */

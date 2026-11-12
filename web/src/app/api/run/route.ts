@@ -34,6 +34,7 @@ import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.
 import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 import { modelForRun } from "@/lib/pipeline-gate.mjs";
+import { agentMode } from "@/lib/tools-catalog.mjs";
 import { gateEvaluation, loadPipelineSettings } from "@/lib/pipeline-gate-run";
 
 export const runtime = "nodejs";
@@ -80,8 +81,13 @@ export async function POST(req: Request) {
   // The precondition must check the file the prompt will actually read. Pinning
   // it to modes/oferta.md meant a configured market passed a check on a file the
   // run never opens, and would have missed a market dir with no evaluation mode.
+  // A Tools-page mode names itself by id; the file comes from the closed catalog.
+  const mode = kind === "mode" ? agentMode((brief as { mode?: unknown } | null | undefined)?.mode) : null;
+  if (kind === "mode" && !mode) {
+    return new Response(JSON.stringify({ error: "Unknown mode." }), { status: 400, headers: { "Content-Type": "application/json" } });
+  }
   const lang = readLanguageConfig();
-  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "modes/cover.md" };
+  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "modes/cover.md", ...(mode ? { mode: mode.file } : {}) };
   const required = needsScript[kind];
   // Scripts and system modes live in the code checkout, which on a split-layout
   // install is not the data root (cv.md, reports/ and output stay under that).
@@ -276,6 +282,7 @@ export async function POST(req: Request) {
       reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
       coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
       profile: profileRef(careerOpsRoot()),
+      modeFile: mode?.file,
       evaluationInstructions: instructionFile?.reference,
       prefetchedJd,
       closedEvidence,
