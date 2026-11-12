@@ -221,12 +221,28 @@ html {
 .page-enter > * > :nth-child(7) { animation-delay: 540ms; }
 .page-enter > * > :nth-child(n + 8) { animation-delay: 630ms; }
 
+/* The page replacing a placeholder that already played the entrance
+   (app/template.tsx sets data-enter="swap"): one short fade, all at once, so
+   the page does not build itself top-down a second time. Same specificity as
+   the stagger rules above and declared after them, so it wins. */
+@keyframes page-swap {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.page-enter[data-enter="swap"] > * > *,
+.page-enter[data-enter="swap"] > :not(div) {
+  animation: page-swap 220ms ease-out backwards;
+  animation-delay: 0ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cli-cursor,
   .animate-terminal-popup,
   .animate-fade-in-delayed,
   .page-enter > * > *,
-  .page-enter > :not(div) {
+  .page-enter > :not(div),
+  .page-enter[data-enter="swap"] > * > *,
+  .page-enter[data-enter="swap"] > :not(div) {
     animation: none;
   }
   .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }

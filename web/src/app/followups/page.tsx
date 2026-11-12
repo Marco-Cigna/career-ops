@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { FollowupsPageSkeleton } from "@/components/page-loading-skeletons";
 import { FollowupsView } from "@/components/followups/followups-view";
 import { readFollowupsEnabled } from "@/lib/followups-server";
 
@@ -19,7 +20,7 @@ export default function FollowupsPage() {
     );
   }
   return (
-    <Suspense>
+    <Suspense fallback={<FollowupsPageSkeleton />}>
       <FollowupsView />
     </Suspense>
   );

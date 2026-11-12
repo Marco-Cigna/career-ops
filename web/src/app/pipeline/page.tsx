@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { PipelinePageSkeleton } from "@/components/page-loading-skeletons";
 import { pdfReadyForReport, pipelineSummary, readTrackerShape, withCloseDates, type InboxJob } from "@/lib/career-ops";
 import { reportNumberFromCell } from "@/lib/apply/cv-selection.mjs";
 import { pendingInbox } from "@/lib/inbox-pending.mjs";
@@ -36,7 +37,9 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
         )
       ).filter((n): n is string => n !== null);
   return (
-    <Suspense>
+    // The route's own placeholder, not null: an empty fallback blanked the page
+    // between the placeholder and the table, which read as a second load.
+    <Suspense fallback={<PipelinePageSkeleton />}>
       <PipelineView
         applications={applications}
         inbox={fitted ? fitted.jobs : null}
