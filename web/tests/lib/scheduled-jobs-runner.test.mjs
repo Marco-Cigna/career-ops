@@ -25,12 +25,15 @@ import {
   extractRolesFound,
   MAX_ATTEMPTS,
   MAX_RUNS,
+  MAX_SCAN_TIMEOUT_MS,
   nextFutureRun,
   recordCompletion,
   runnerResourcePath,
   SCAN_TIMEOUT_MS,
+  scanTimeoutMs,
 } from "../../scripts/scheduled-jobs-runner.mjs";
 import { assertScheduledJobBody } from "../../src/lib/scheduled-job-input.mjs";
+import { SCHEDULED_RUN_LIMIT_MS } from "../../src/lib/scan-depth.mjs";
 import { scanFailureMessage, stderrCause } from "../../src/lib/scheduled-scan-error.mjs";
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -111,8 +114,25 @@ test("scan command honors the selected engine and bounded filters", () => {
   });
   assert.deepEqual(buildScanCommand({ engine: "full", filters }), {
     script: "scan-ats-full.mjs",
-    args: ["--since", "5", "--ats", "lever,ashby", "--limit", "500", "--json"],
+    args: ["--since", "5", "--ats", "lever,ashby", "--limit", "999", "--json"],
   });
+  assert.deepEqual(buildScanCommand({ engine: "full", filters: { ...filters, limitPerAts: 10 } }).args.slice(4, 6), ["--limit", "50"]);
+  assert.deepEqual(buildScanCommand({ engine: "full", filters: { ...filters, limitPerAts: 1e9 } }).args.slice(4, 6), ["--limit", "100000"]);
+});
+
+test("scan timeout grows with depth, between the default and the ceiling", () => {
+  const job = (limitPerAts, ats = ["greenhouse"]) => ({ engine: "full", filters: { ats, limitPerAts } });
+  assert.equal(scanTimeoutMs({ engine: "portals", filters: { limitPerAts: 100000 } }), SCAN_TIMEOUT_MS);
+  assert.equal(scanTimeoutMs(job(150)), SCAN_TIMEOUT_MS);
+  // Every Greenhouse, Lever and Ashby board, one source after another: deeper
+  // than the default allows, and well within the ceiling.
+  const allThree = scanTimeoutMs(job(100000, ["greenhouse", "lever", "ashby"]));
+  assert.ok(allThree > SCAN_TIMEOUT_MS && allThree < MAX_SCAN_TIMEOUT_MS, String(allThree));
+  // Every Workday board takes hours: the ceiling holds.
+  assert.equal(scanTimeoutMs(job(100000, ["workday"])), MAX_SCAN_TIMEOUT_MS);
+  // The lock and the Run now route wait for the longest whole run: every attempt
+  // at the ceiling. A shorter wait would cut off a deep scan still in progress.
+  assert.equal(SCHEDULED_RUN_LIMIT_MS, MAX_SCAN_TIMEOUT_MS * MAX_ATTEMPTS + 60_000);
 });
 
 test("scheduled overlay falls back to portal title keywords and preserves hard location blocks", () => {

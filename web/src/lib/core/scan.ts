@@ -8,11 +8,12 @@ import { writeTempPortals, cleanupTempPortals } from "./portals";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { titleFit } from "@/lib/title-fit.mjs";
-import { resolveScanTimeoutMs, scanTimeoutMessage } from "./scan-timeout.mjs";
+import { configuredScanTimeoutMs, DEFAULT_SCAN_TIMEOUT_MS, scanTimeoutMessage } from "./scan-timeout.mjs";
 import { ATS_LABEL, ATS_SOURCES, type AtsSource, type DiscoveredOffer, type ExploreFilters, type FitBand, type ScanEvent } from "@/lib/explore";
 import { mergeScanResults, timedOutMessage } from "./scan-merge.mjs";
 import { parseScanJsonStdout } from "./scan-json.mjs";
 import { scannerArgs } from "./scan-args.mjs";
+import { depthBudgetMs, estimateScanSeconds } from "@/lib/scan-depth.mjs";
 
 export type { DiscoveredOffer, ScanEvent, AtsSource } from "@/lib/explore";
 export { ATS_SOURCES } from "@/lib/explore";
@@ -164,11 +165,16 @@ type ScanJson = {
 // place `scan.extractor` lives. Never throws: a missing/malformed profile keeps
 // the default (a broken config must not block scanning).
 export function readScanTimeoutMs(): number {
+  return readConfiguredScanTimeoutMs() ?? DEFAULT_SCAN_TIMEOUT_MS;
+}
+
+/** The budget the user set, or null when they set none (or it is unreadable). */
+export function readConfiguredScanTimeoutMs(): number | null {
   try {
     const parsed = yaml.load(fs.readFileSync(getProfilePath(careerOpsRoot()), "utf8"));
-    return resolveScanTimeoutMs(parsed);
+    return configuredScanTimeoutMs(parsed);
   } catch {
-    return resolveScanTimeoutMs(undefined);
+    return null;
   }
 }
 
@@ -197,6 +203,7 @@ function runScanner(
   sink: { offers: DiscoveredOffer[]; seen: Set<string> },
   timeoutMs: number,
   roleTargets: string[],
+  signal?: AbortSignal,
 ): Promise<ScannerRun> {
   return new Promise((resolve) => {
     const args = [
@@ -234,8 +241,21 @@ function runScanner(
       settled = true;
       clearTimeout(killer);
       if (hardKiller) clearTimeout(hardKiller);
+      signal?.removeEventListener("abort", stopOnAbort);
       resolve(run);
     };
+
+    // The viewer left (closed the tab, or cancelled): a deep scan can run for an
+    // hour, so stop sweeping boards for a result nobody will read.
+    const stopOnAbort = () => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* ignore */
+      }
+    };
+    if (signal?.aborted) stopOnAbort();
+    else signal?.addEventListener("abort", stopOnAbort, { once: true });
 
     const killer = setTimeout(() => {
       timedOut = true;
@@ -375,13 +395,24 @@ function runScanner(
 
 const NO_OUTPUT = "The scanner returned no readable output.";
 
-export async function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
+export async function runDiscovery(
+  filters: ExploreFilters,
+  onEvent: (e: ScanEvent) => void,
+  signal?: AbortSignal,
+): Promise<DiscoveredOffer[]> {
   const tempPortals = writeTempPortals(filters);
   const ats = (filters.ats.length ? filters.ats : [...ATS_SOURCES]).filter((a) => (ATS_SOURCES as readonly string[]).includes(a));
   const useJson = scannerSupportsJson();
-  // Read once per run: every child gets the same budget, and the copy quotes it
-  // exactly (a 1.5s budget must not read as 2s).
-  const timeoutMs = readScanTimeoutMs();
+  // Read once per run. A scan.timeout_seconds the user set is the budget, exactly,
+  // at any depth. Without one, the default is only where the budget starts: a
+  // deeper scan gets the time its depth needs, up to an hour, so raising the depth
+  // is not undone by a deadline sized for 150 companies. Each source gets its own
+  // budget, since one Workday company takes as long as thirty on Greenhouse. The
+  // copy quotes budgets exactly (a 1.5s budget must not read as 2s).
+  const configuredMs = readConfiguredScanTimeoutMs();
+  const budgetFor = (sources: string[]) =>
+    configuredMs ?? depthBudgetMs(estimateScanSeconds(sources, filters.limitPerAts, { parallel: false }), DEFAULT_SCAN_TIMEOUT_MS);
+  const timeoutMs = budgetFor(ats);
   const deadlineSec = timeoutMs / 1000;
   const roleTargets = loadProfileTargets();
   const label = (a: string) => ATS_LABEL[a as AtsSource] ?? a;
@@ -394,7 +425,7 @@ export async function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEve
       // Older checkouts: one child, human-stdout parse. It streams offers as they
       // arrive, so the ones collected so far are returned; a deadline kill still
       // says so instead of ending silently.
-      const run = await runScanner(ats, false, filters, tempPortals, onEvent, sink, timeoutMs, roleTargets);
+      const run = await runScanner(ats, false, filters, tempPortals, onEvent, sink, timeoutMs, roleTargets, signal);
       if (run.failed) onEvent({ kind: "error", message: run.failed });
       else if (run.timedOut) onEvent({ kind: "error", message: scanTimeoutMessage(timeoutMs) });
       return sink.offers;
@@ -404,8 +435,9 @@ export async function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEve
     // Dry runs write no scanner state and each source caches its own dataset
     // file, so the children don't contend.
     const runs = await Promise.all(
-      ats.map((a) => runScanner([a], true, filters, tempPortals, onEvent, sink, timeoutMs, roleTargets)),
+      ats.map((a) => runScanner([a], true, filters, tempPortals, onEvent, sink, budgetFor([a]), roleTargets, signal)),
     );
+    const stoppedAfterSec = (sources: string[]) => Math.max(...sources.map((a) => budgetFor([a]))) / 1000;
 
     const { offers, seen } = sink;
     const finished: ScanJson[] = [];
@@ -426,13 +458,13 @@ export async function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEve
       const failed = runs.find((r) => r.failed)?.failed;
       onEvent({
         kind: "error",
-        message: timedOut.length ? timedOutMessage(timedOut.map(label), deadlineSec) : failed || NO_OUTPUT,
+        message: timedOut.length ? timedOutMessage(timedOut.map(label), stoppedAfterSec(timedOut)) : failed || NO_OUTPUT,
       });
       return offers;
     }
 
     if (timedOut.length) {
-      const message = timedOutMessage(timedOut.map(label), deadlineSec);
+      const message = timedOutMessage(timedOut.map(label), stoppedAfterSec(timedOut));
       // No source finished: the timeout is the outcome, as when a stopped child
       // printed nothing. Otherwise it is a note beside the sources that finished.
       onEvent(incomplete.length === ats.length ? { kind: "error", message } : { kind: "log", line: message });

@@ -119,6 +119,7 @@ export type ScanEvent =
 // with the test suite without a TypeScript runner. Import for internal use
 // and re-export for external consumers (filter-builder.tsx, etc.).
 import { cleanChips } from "./clean-chips.mjs";
+import { clampDepth, DEPTH_ALL } from "./scan-depth.mjs";
 export { cleanChips };
 
 function clampNum(v: unknown, lo: number, hi: number, fallback: number): number {
@@ -165,8 +166,8 @@ export function parseExplorePatch(
   }
   if (raw.since !== undefined) next.sinceDays = clampNum(raw.since, 1, 60, base.sinceDays);
   if (raw.sinceDays !== undefined) next.sinceDays = clampNum(raw.sinceDays, 1, 60, base.sinceDays);
-  if (raw.limit !== undefined) next.limitPerAts = clampNum(raw.limit, 50, 500, base.limitPerAts);
-  if (raw.limitPerAts !== undefined) next.limitPerAts = clampNum(raw.limitPerAts, 50, 500, base.limitPerAts);
+  if (raw.limit !== undefined) next.limitPerAts = clampDepth(raw.limit, base.limitPerAts);
+  if (raw.limitPerAts !== undefined) next.limitPerAts = clampDepth(raw.limitPerAts, base.limitPerAts);
   if (raw.ats !== undefined) next.ats = cleanAts(raw.ats);
   return next;
 }
@@ -186,7 +187,7 @@ export function filtersToParams(f: ExploreFilters): string {
   if (f.alwaysAllow.length) sp.set("home", f.alwaysAllow.join(","));
   if (f.sinceDays !== DEFAULT_FILTERS.sinceDays) sp.set("since", String(f.sinceDays));
   if (f.ats.length !== ATS_SOURCES.length) sp.set("ats", f.ats.join(","));
-  if (f.limitPerAts !== DEFAULT_FILTERS.limitPerAts) sp.set("limit", String(f.limitPerAts));
+  if (f.limitPerAts !== DEFAULT_FILTERS.limitPerAts) sp.set("limit", f.limitPerAts >= DEPTH_ALL ? "all" : String(f.limitPerAts));
   return sp.toString();
 }
 

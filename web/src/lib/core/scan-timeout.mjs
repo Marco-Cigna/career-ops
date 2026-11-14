@@ -7,22 +7,32 @@
 // `scan.extractor` lives. The default keeps a safety margin under the route's
 // maxDuration (300s) so the scanner's final JSON can still be parsed and flushed
 // before the platform would cut the response.
+//
+// A budget the user set is used exactly, at any depth. Without one, the default
+// is only the starting point: a scan deeper than the default gets the time its
+// depth needs, up to an hour (depthBudgetMs in lib/scan-depth.mjs).
 
 export const DEFAULT_SCAN_TIMEOUT_MS = 230_000;
+
+/** The `scan.timeout_seconds` the user set (ms), or null when it is missing,
+ *  non-numeric, or not strictly positive. Never throws. */
+export function configuredScanTimeoutMs(profile) {
+  const scan = profile && typeof profile === "object" && !Array.isArray(profile) ? profile.scan : undefined;
+  const raw = scan && typeof scan === "object" && !Array.isArray(scan) ? scan.timeout_seconds : undefined;
+  // Accept only numbers and numeric strings — Number(true) is 1, which would
+  // otherwise turn `timeout_seconds: true` into a 1s budget instead of the default.
+  if (typeof raw !== "number" && typeof raw !== "string") return null;
+  if (typeof raw === "string" && raw.trim() === "") return null;
+  const secs = Number(raw);
+  return Number.isFinite(secs) && secs > 0 ? Math.floor(secs * 1000) : null;
+}
 
 /** Resolve the scan timeout (ms) from a parsed profile.yml object, reading
  *  `scan.timeout_seconds`. Never throws; falls back to the default for anything
  *  missing, non-numeric, or not strictly positive (a broken config must not
  *  block scanning). Accepts any value so callers can pass an unparsed profile. */
 export function resolveScanTimeoutMs(profile) {
-  const scan = profile && typeof profile === "object" && !Array.isArray(profile) ? profile.scan : undefined;
-  const raw = scan && typeof scan === "object" && !Array.isArray(scan) ? scan.timeout_seconds : undefined;
-  // Accept only numbers and numeric strings — Number(true) is 1, which would
-  // otherwise turn `timeout_seconds: true` into a 1s budget instead of the default.
-  if (typeof raw !== "number" && typeof raw !== "string") return DEFAULT_SCAN_TIMEOUT_MS;
-  if (typeof raw === "string" && raw.trim() === "") return DEFAULT_SCAN_TIMEOUT_MS;
-  const secs = Number(raw);
-  return Number.isFinite(secs) && secs > 0 ? Math.floor(secs * 1000) : DEFAULT_SCAN_TIMEOUT_MS;
+  return configuredScanTimeoutMs(profile) ?? DEFAULT_SCAN_TIMEOUT_MS;
 }
 
 /** Honest, actionable message when our own timer stopped the scanner before it

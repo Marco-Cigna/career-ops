@@ -264,6 +264,17 @@ export function withIdCache(ctx, idCaches, provider) {
   return idCaches ? { ...ctx, idCache: idCaches.forProvider(provider?.id) } : ctx;
 }
 
+// Tells the provider which titles the title filter will keep, the way scan.mjs
+// does for tracked companies. workday.mjs spends one detail GET (250ms apart,
+// up to 200 per board) on every multi-location posting to read its places;
+// without this it paid that for postings processJobs then drops on their title,
+// which is most of them on a large board. Every posting here passes the title
+// filter before it is kept, so a skipped lookup never changes the result.
+export function withTitleWanted(ctx, titleFilter, companySlug) {
+  if (typeof titleFilter !== 'function') return ctx;
+  return { ...ctx, titleWanted: (title) => titleFilter(title, companySlug) };
+}
+
 // Same rule for the provider id cache: a failed write costs later runs a
 // lookup, never this sweep's matches. It never rejects, so a checkpoint can
 // start it without awaiting.
@@ -1349,7 +1360,7 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
       }
       const operation = { active: true };
       const operationPromise = (async () => {
-        const jobs = await provider.fetch(entry, withIdCache(ctx, idCaches, provider));
+        const jobs = await provider.fetch(entry, withTitleWanted(withIdCache(ctx, idCaches, provider), opts.titleFilter, entry.name));
         if (!operation.active) return;
         await processJobs(jobs, `${seed.vendor}-history`, provider, entry.name, () => operation.active);
       })();
@@ -1961,7 +1972,7 @@ async function main() {
               return;
             }
           }
-          const jobs = await source.provider.fetch(entry, sourceCtx);
+          const jobs = await source.provider.fetch(entry, withTitleWanted(sourceCtx, titleFilter, entry.name));
           recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
           // Queued BEFORE the gate, deliberately: a board the gate cannot yet
@@ -2066,7 +2077,7 @@ async function main() {
         try {
           await boardScope(source, `${name}/${entry.name} (retry)`, COMPANY_TIMEOUT_MS, async (signal) => {
             retrySignal = signal;
-            const jobs = await source.provider.fetch(entry, sourceCtx);
+            const jobs = await source.provider.fetch(entry, withTitleWanted(sourceCtx, titleFilter, entry.name));
             recordBoardResult(deadBoards, name, boardKey(entry), 200);
             // Where a board deferred by the parallel sweep is actually decided.
             // A board the sweep already admitted is never gated here, and one

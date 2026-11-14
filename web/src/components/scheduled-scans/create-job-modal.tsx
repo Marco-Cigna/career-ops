@@ -13,20 +13,21 @@ export function CreateJobModal({
   isOpen,
   onClose,
   onCreated,
+  seed,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onCreated: () => void;
+  /** The user's own filters (portals.yml, else profile.yml target roles). */
+  seed?: { filters: ExploreFilters; seededFrom: string[] };
 }) {
   const [name, setName] = useState("Scheduled scan");
   const [engine, setEngine] = useState<ScanEngine>("full");
   const [every, setEvery] = useState(6);
   const [unit, setUnit] = useState<"minutes" | "hours" | "days">("hours");
-  const [filters, setFilters] = useState<ExploreFilters>({
-    ...DEFAULT_FILTERS,
-    ats: [...DEFAULT_FILTERS.ats],
-    positive: [],
-    negative: [],
+  const [filters, setFilters] = useState<ExploreFilters>(() => {
+    const from = seed?.filters ?? DEFAULT_FILTERS;
+    return { ...from, ats: [...from.ats], positive: [...from.positive], negative: [...from.negative] };
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -132,7 +133,7 @@ export function CreateJobModal({
 
           {/* ─── Reuse FilterBuilder from Explore ─── */}
           <div className="rounded-xl border border-border bg-surface/30 p-4">
-            <FilterBuilder filters={filters} onChange={setFilters} />
+            <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed?.seededFrom} sequential savedCompanies={engine === "portals"} />
           </div>
 
           {/* ─── Actions ─── */}

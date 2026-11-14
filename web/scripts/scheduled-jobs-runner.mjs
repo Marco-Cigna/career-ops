@@ -18,11 +18,15 @@ import { getCareerOpsRoot } from "../../path-resolver.mjs";
 import { pollLinkedInInbox } from "../../lib/linkedin-auto.mjs";
 import { getProfilePath } from "../src/lib/core/profile-path.mjs";
 import { scanFailureMessage } from "../src/lib/scheduled-scan-error.mjs";
+import { clampDepth, depthBudgetMs, estimateScanSeconds, SCHEDULED_BUDGET_CEILING_MS, SCHEDULED_RUN_LIMIT_MS } from "../src/lib/scan-depth.mjs";
 
 const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const MAX_RUNS = 100;
 export const MAX_ATTEMPTS = 3;
+/** The timeout for a scan at the default depth, and the floor for deeper ones. */
 export const SCAN_TIMEOUT_MS = 25 * 60 * 1_000;
+/** The longest any scheduled scan may run, however deep (see scanTimeoutMs). */
+export const MAX_SCAN_TIMEOUT_MS = SCHEDULED_BUDGET_CEILING_MS;
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 export const QUEUE_CLAIM_STALE_MS = 30 * 1_000;
 
@@ -120,14 +124,30 @@ export function buildScanCommand(job) {
     };
   }
 
-  const ats = Array.isArray(filters.ats) && filters.ats.length
-    ? filters.ats.join(",")
-    : "greenhouse,lever,ashby,workday";
-  const limit = numericFilter(filters.limitPerAts, 150, 50, 500);
+  const ats = scheduledSources(job).join(",");
+  const limit = clampDepth(filters.limitPerAts);
   return {
     script: "scan-ats-full.mjs",
     args: ["--since", String(sinceDays), "--ats", ats, "--limit", String(limit), "--json"],
   };
+}
+
+function scheduledSources(job) {
+  const ats = job.filters?.ats;
+  return Array.isArray(ats) && ats.length ? ats : ["greenhouse", "lever", "ashby", "workday"];
+}
+
+/**
+ * How long this job's scanner may run. A Saved companies scan and a
+ * public-board scan at the default depth keep SCAN_TIMEOUT_MS. A deeper
+ * public-board scan gets the time its depth needs, since every source runs in
+ * one scanner, one after another, up to MAX_SCAN_TIMEOUT_MS.
+ */
+export function scanTimeoutMs(job) {
+  if (job.engine === "portals") return SCAN_TIMEOUT_MS;
+  const depth = clampDepth(job.filters?.limitPerAts);
+  const estimate = estimateScanSeconds(scheduledSources(job), depth, { parallel: false });
+  return depthBudgetMs(estimate, SCAN_TIMEOUT_MS, MAX_SCAN_TIMEOUT_MS);
 }
 
 export function extractRolesFound(engine, stdout) {
@@ -190,6 +210,7 @@ function writeJobPortals(root, job) {
 export function executeJob(root, job, options = {}) {
   const spawnFn = options.spawnFn || spawnSync;
   const startedAt = Date.now();
+  const timeoutMs = scanTimeoutMs(job);
   let lastError = "Scan failed";
   let finalAttempt = MAX_ATTEMPTS;
 
@@ -212,7 +233,7 @@ export function executeJob(root, job, options = {}) {
             ...(process.env.CAREER_OPS_PROFILE?.trim() ? { CAREER_OPS_PROFILE: getProfilePath(root) } : {}),
           },
           encoding: "utf8",
-          timeout: SCAN_TIMEOUT_MS,
+          timeout: timeoutMs,
           maxBuffer: MAX_OUTPUT_BYTES,
           windowsHide: true,
         },
@@ -228,7 +249,7 @@ export function executeJob(root, job, options = {}) {
           message: `Scan finished with ${rolesFound} matching role${rolesFound === 1 ? "" : "s"}.`,
         };
       }
-      lastError = scanFailureMessage(result, { timeoutMs: SCAN_TIMEOUT_MS });
+      lastError = scanFailureMessage(result, { timeoutMs });
       if (result.error?.code === "ETIMEDOUT") {
         finalAttempt = attempt;
         break;
@@ -335,7 +356,9 @@ async function main() {
       if (result.state === "failed") throw new Error(result.message);
       return { status: "success", jobId: claim.job.id, ...result };
     },
-    { timeoutMs: 1_000, staleMs: SCAN_TIMEOUT_MS * MAX_ATTEMPTS + 60_000 },
+    // Sized for the longest run a job can make. A crashed runner is still
+    // recovered at once: the lock checks whether its owner's pid is alive.
+    { timeoutMs: 1_000, staleMs: SCHEDULED_RUN_LIMIT_MS },
   );
 }
 

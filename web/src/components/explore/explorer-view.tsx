@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings, Info } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { pageFrameWidthClass } from "@/components/page-frame";
@@ -284,7 +284,39 @@ function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover:
         <span className="size-1.5 rounded-full bg-emerald-500" />
         Evaluating a role later costs tokens. Discovering never does.
       </span>
+      {filters.preset !== CHINA_PRESET && <ScopeTip />}
     </div>
+  );
+}
+
+/** Explore samples the public ATS network; it never reads portals.yml. Without
+ *  this, "searched 1,500 of 15,862 companies" reads as a cap on YOUR list. */
+function ScopeTip() {
+  const id = useId();
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-describedby={id}
+        className="inline-flex items-center gap-1 rounded text-[12px] text-muted underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:text-foreground max-sm:min-h-[44px]"
+      >
+        <Info className="size-3.5" /> Not your saved companies
+      </button>
+      {/* pb-2 (not mb-2) keeps the pointer inside the group on its way to the link. */}
+      <span
+        id={id}
+        role="tooltip"
+        className="invisible absolute bottom-full left-0 z-30 w-[min(20rem,calc(100vw-2rem))] pb-2 opacity-0 transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
+      >
+        <span className="block rounded-lg border border-border bg-surface px-3 py-2.5 text-[12px] leading-relaxed text-foreground shadow-lg">
+          This searches public job boards (Greenhouse, Lever, Ashby, Workday): a fresh random sample of companies on each
+          board, up to the scan depth. It does not check the companies you saved. To scan those, open{" "}
+          <Link href="/scheduled-scans" className="font-medium text-brand-text hover:underline">Scheduled scans</Link>, create a
+          scan with <span className="font-medium">Where to check: Saved companies</span>, then press{" "}
+          <span className="font-medium">Run now</span>. That checks every company you saved, every time.
+        </span>
+      </span>
+    </span>
   );
 }
 
@@ -354,7 +386,7 @@ function CappedBanner({ companiesScanned, companiesAvailable, onRefine }: { comp
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] px-4 py-2.5 text-[13px]">
       <span className="text-foreground">
         Showing a capped slice — searched {companiesScanned.toLocaleString()}
-        {companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} companies.
+        {companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} companies on public job boards.
       </span>
       <button onClick={onRefine} className="font-medium text-brand-text hover:underline">
         Raise scan depth to search deeper

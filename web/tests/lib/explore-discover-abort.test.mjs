@@ -105,7 +105,9 @@ test("Discover writes nothing to pipeline.md: only the offers the user picks are
 });
 
 test("the scanner budget is the configured one, with no floor over it", () => {
-  assert.match(scan, /const timeoutMs = readScanTimeoutMs\(\);/);
-  assert.doesNotMatch(scan, /Math\.max\(\s*readScanTimeoutMs/, "a scan.timeout_seconds below a floor would be silently ignored");
+  // A configured scan.timeout_seconds wins outright; only an unset one grows with depth.
+  assert.match(scan, /const configuredMs = readConfiguredScanTimeoutMs\(\);/);
+  assert.match(scan, /configuredMs \?\? depthBudgetMs\(/);
+  assert.doesNotMatch(scan, /Math\.max\(\s*(readScanTimeoutMs|readConfiguredScanTimeoutMs|configuredMs)/, "a scan.timeout_seconds below a floor would be silently ignored");
   assert.match(scan, /parseScanJsonStdout/);
 });

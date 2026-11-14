@@ -155,7 +155,7 @@ export function EditJobModal({
 
           {/* ─── Reuse FilterBuilder from Explore ─── */}
           <div className="rounded-xl border border-border bg-surface/30 p-4">
-            <FilterBuilder filters={filters} onChange={setFilters} />
+            <FilterBuilder filters={filters} onChange={setFilters} sequential savedCompanies={engine === "portals"} />
           </div>
 
           {/* ─── Actions ─── */}

@@ -6,6 +6,17 @@ import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
 
 import { CHINA_PRESET, CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
+import {
+  DEPTH_BUDGET_CEILING_MS,
+  DEPTH_DEFAULT,
+  DEPTH_STOPS,
+  depthLabel,
+  depthStopIndex,
+  estimateScanSeconds,
+  estimateSourceSeconds,
+  formatScanDuration,
+  SCHEDULED_BUDGET_CEILING_MS,
+} from "@/lib/scan-depth.mjs";
 import type { EmployerSource } from "@/lib/explore";
 
 const RECENCY = [
@@ -104,16 +115,71 @@ function Label({ children, hint }: { children: React.ReactNode; hint?: string })
   );
 }
 
+function ScanDepth({
+  depth,
+  sources,
+  sequential,
+  onChange,
+}: {
+  depth: number;
+  sources: AtsSource[];
+  sequential: boolean;
+  onChange: (depth: number) => void;
+}) {
+  const estimate = estimateScanSeconds(sources, depth, { parallel: !sequential });
+  const ceilingSec = (sequential ? SCHEDULED_BUDGET_CEILING_MS : DEPTH_BUDGET_CEILING_MS) / 1000;
+  // The slowest source decides whether the scan is cut short.
+  const slowest = sources.reduce<AtsSource | null>(
+    (worst, a) => (worst === null || estimateSourceSeconds(a, depth) > estimateSourceSeconds(worst, depth) ? a : worst),
+    null,
+  );
+  return (
+    <div>
+      <Label hint={`${depthLabel(depth)} / source · ${formatScanDuration(estimate)}`}>Scan depth</Label>
+      <input
+        type="range"
+        min={0}
+        max={DEPTH_STOPS.length - 1}
+        step={1}
+        value={depthStopIndex(depth)}
+        aria-label="Scan depth"
+        aria-valuetext={`${depthLabel(depth)} per source`}
+        onChange={(e) => onChange(DEPTH_STOPS[Number(e.target.value)])}
+        className="w-full accent-brand"
+      />
+      {estimate > ceilingSec ? (
+        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+          {slowest ? ATS_LABEL[slowest] : "This source"} at this depth would take {formatScanDuration(estimate)}, longer than the{" "}
+          {Math.round(ceilingSec / 60)}-minute limit, so the scan stops early
+          {sequential ? " and the run is recorded as failed" : " and shows what it found by then"}. Lower the depth or drop that source.
+        </p>
+      ) : depth > DEPTH_DEFAULT ? (
+        <p className="mt-1 text-[11px] text-faint">
+          Each scan picks a fresh random set of companies. Very deep scans, run back to back, can get throttled by the job boards.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function FilterBuilder({
   filters,
   onChange,
   seededFrom = [],
   disabled = false,
+  sequential = false,
+  savedCompanies = false,
 }: {
   filters: ExploreFilters;
   onChange: (f: ExploreFilters) => void;
   seededFrom?: string[];
   disabled?: boolean;
+  /** A scheduled "Saved companies" scan: scan.mjs over portals.yml, which
+   *  reads every company on its own board and has no source list or depth. */
+  savedCompanies?: boolean;
+  /** A scheduled scan checks its sources one after another (Explore runs them
+   *  side by side), so its time estimate adds them up. */
+  sequential?: boolean;
 }) {
   const employer = filters.preset === CHINA_PRESET;
   const [advanced, setAdvanced] = useState(false);
@@ -127,14 +193,14 @@ export function FilterBuilder({
   return (
     <fieldset disabled={disabled} className="space-y-4">
       <style>{STYLE}</style>
-      <fieldset>
+      {!savedCompanies && <fieldset>
         <legend className="mb-1.5 text-[13px] font-medium">Discovery sources</legend>
         <div className="flex flex-wrap gap-4 text-sm">
           <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={!employer} onChange={() => set({ preset: undefined })} />Public ATS network</label>
           <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={employer} onChange={() => set({ preset: CHINA_PRESET, employers: [...CHINA_SOURCES] as EmployerSource[] })} />China employer preset</label>
         </div>
-      </fieldset>
-      {employer && <fieldset aria-describedby="employer-scope employer-selection">
+      </fieldset>}
+      {employer &&<fieldset aria-describedby="employer-scope employer-selection">
         <legend className="mb-2 text-[13px] font-medium">Employers</legend>
         <div className="flex flex-wrap gap-4">{CHINA_SOURCES.map(id => <label key={id} className="inline-flex items-center gap-2 text-sm">
           <input type="checkbox" checked={filters.employers?.includes(id as EmployerSource) ?? false} onChange={e => set({ employers: e.target.checked ? [...(filters.employers ?? []), id as EmployerSource] : (filters.employers ?? []).filter(x => x !== id) })} />{EMPLOYER_LABEL[id as keyof typeof EMPLOYER_LABEL]}
@@ -195,6 +261,11 @@ export function FilterBuilder({
           </div>
         </div>
 
+        {savedCompanies ? (
+        <p className="max-w-xs text-[12px] text-muted">
+          Checks every company in your saved list, on whichever job board each one uses. No source list or depth to set.
+        </p>
+        ) : (
         <div>
           <Label hint={filters.ats.length === 0 ? "pick at least one" : undefined}>Sources</Label>
           <div className="flex flex-wrap gap-1.5">
@@ -216,6 +287,7 @@ export function FilterBuilder({
             })}
           </div>
         </div>
+        )}
       </div>}
 
       {!employer && <button
@@ -224,7 +296,7 @@ export function FilterBuilder({
         className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground transition-colors max-sm:min-h-[44px]"
       >
         <SlidersHorizontal className="size-3.5" />
-        More location controls &amp; scan depth
+        {savedCompanies ? "More location controls" : <>More location controls &amp; scan depth</>}
         <ChevronDown className={cn("size-3.5 transition-transform", advanced && "rotate-180")} />
       </button>}
 
@@ -244,19 +316,12 @@ export function FilterBuilder({
             <Label hint="hard reject — overrides Always include">Never include</Label>
             <KeywordField ariaLabel="Never include" values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
           </div>
-          <div>
-            <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
-            <input
-              type="range"
-              min={50}
-              max={500}
-              step={50}
-              value={filters.limitPerAts}
-              aria-label="Scan depth"
-              onChange={(e) => set({ limitPerAts: Number(e.target.value) })}
-              className="w-full accent-brand"
-            />
-          </div>
+          {!savedCompanies && <ScanDepth
+            depth={filters.limitPerAts}
+            sources={filters.ats}
+            sequential={sequential}
+            onChange={(limitPerAts) => set({ limitPerAts })}
+          />}
         </div>
       )}
     </fieldset>

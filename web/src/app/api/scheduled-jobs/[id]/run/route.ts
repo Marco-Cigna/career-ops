@@ -6,11 +6,14 @@ import { getScheduledJob } from "@/lib/scheduled-jobs";
 import { isSafeScheduledId } from "@/lib/scheduled-jobs-store.mjs";
 import { stderrCause } from "@/lib/scheduled-scan-error.mjs";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { SCHEDULED_RUN_LIMIT_MS } from "@/lib/scan-depth.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TIMEOUT_MS = 76 * 60 * 1_000;
+// The runner bounds its own scans by depth; this only catches a runner that
+// never exits, so it waits as long as the longest run the runner can make.
+const TIMEOUT_MS = SCHEDULED_RUN_LIMIT_MS;
 const KILL_GRACE_MS = 5_000;
 const MAX_OUTPUT = 512 * 1024;
 

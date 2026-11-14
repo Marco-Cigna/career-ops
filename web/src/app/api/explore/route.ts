@@ -11,6 +11,9 @@ import { readJsonObject } from "@/lib/json-body";
 
 // Discovery is HTTP-bound across many ATS boards; give it room. It is FREE —
 // zero LLM tokens (the scanner only does HTTP + JSON, and --dry-run writes nothing).
+// maxDuration binds only on a hosting platform; the local server career-ops runs
+// on does not enforce it, which is what lets a deep scan (lib/scan-depth.mjs)
+// run past 300s. The scanner's own budget stops it at an hour at most.
 export const runtime = "nodejs";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -52,7 +55,7 @@ export async function POST(req: NextRequest) {
       try {
         offers = employer
           ? await runEmployerDiscovery(body, { codeRoot: path.dirname(rootScript("scan")), signal: abort.signal, onEvent: (e: ScanEvent) => send(e) })
-          : await runDiscovery(filters, (e: ScanEvent) => send(e));
+          : await runDiscovery(filters, (e: ScanEvent) => send(e), abort.signal);
       } catch (err) {
         send({ kind: "error", message: err instanceof Error ? err.message : "discovery failed" } satisfies ScanEvent);
       }

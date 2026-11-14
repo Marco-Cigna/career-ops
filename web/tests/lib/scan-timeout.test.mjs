@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveScanTimeoutMs,
+  configuredScanTimeoutMs,
   scanTimeoutMessage,
   DEFAULT_SCAN_TIMEOUT_MS,
 } from "../../src/lib/core/scan-timeout.mjs";
@@ -36,6 +37,15 @@ test("ignores a malformed scan block (array / non-object)", () => {
   assert.equal(resolveScanTimeoutMs({ scan: [1, 2, 3] }), DEFAULT_SCAN_TIMEOUT_MS);
   assert.equal(resolveScanTimeoutMs({ scan: "cli" }), DEFAULT_SCAN_TIMEOUT_MS);
   assert.equal(resolveScanTimeoutMs([1, 2, 3]), DEFAULT_SCAN_TIMEOUT_MS);
+});
+
+test("configuredScanTimeoutMs tells a set budget from an unset one", () => {
+  assert.equal(configuredScanTimeoutMs({ scan: { timeout_seconds: 60 } }), 60_000);
+  assert.equal(configuredScanTimeoutMs({ scan: { timeout_seconds: 230 } }), 230_000);
+  assert.equal(configuredScanTimeoutMs({}), null);
+  assert.equal(configuredScanTimeoutMs({ scan: { timeout_seconds: "" } }), null);
+  assert.equal(configuredScanTimeoutMs({ scan: { timeout_seconds: true } }), null);
+  assert.equal(configuredScanTimeoutMs({ scan: { timeout_seconds: -5 } }), null);
 });
 
 test("the timeout message names the elapsed seconds and the config knob", () => {

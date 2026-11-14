@@ -22,6 +22,7 @@ import { EditJobModal } from "./scheduled-scans/edit-job-modal";
 import { JobCard } from "./scheduled-scans/job-card";
 import { RunHistoryDrawer } from "./scheduled-scans/run-history-drawer";
 import type { ScheduledJob, JobRun } from "@/lib/scheduled-jobs";
+import type { ExploreFilters } from "@/lib/explore";
 import { updateScheduledJobRequest } from "@/lib/scheduled-job-client.mjs";
 import { isSchedulerStatusPayload } from "@/lib/scheduled-scheduler-status.mjs";
 
@@ -45,7 +46,7 @@ const OS_SCHEDULERS: Record<string, { title: string; install: string } | undefin
   linux: { title: "Linux cron Integration", install: "sh web/scripts/install-scan-schedule.sh" },
 };
 
-export function ScheduledJobsView() {
+export function ScheduledJobsView({ seed }: { seed?: { filters: ExploreFilters; seededFrom: string[] } }) {
   const [store, setStore] = useState<Store>({ jobs: [], runs: [] });
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -324,7 +325,10 @@ export function ScheduledJobsView() {
       )}
 
       {/* Create Modal, Edit Modal & History Drawer */}
+      {/* Keyed on open, so each new scan starts from the seed, not from the last one's edits. */}
       <CreateJobModal
+        key={createModalOpen ? "open" : "closed"}
+        seed={seed}
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         onCreated={loadData}
