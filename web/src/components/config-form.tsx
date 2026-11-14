@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { ClaudeAccountSettings } from "@/components/claude-account-settings";
 import { TemplatesSection } from "@/components/templates/templates-section";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
 import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
@@ -266,6 +267,8 @@ export function ConfigForm() {
           </div>
         )}
       </div>
+
+      {mode === "cli" && installed.some((c) => c.id === "claude") ? <ClaudeAccountSettings /> : null}
 
       {/* Appearance / privacy */}
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">

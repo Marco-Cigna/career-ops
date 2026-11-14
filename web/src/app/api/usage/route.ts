@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createUsageScanner } from "@/lib/claude-usage-scan.mjs";
@@ -19,8 +20,25 @@ export const dynamic = "force-dynamic";
 type Usage = { window5h: { tokens: number; messages: number }; window7d: { tokens: number; messages: number }; computedAt: number };
 type Plan = { rows: { label: string; percent: number; resets: string | null }[] } | null;
 let cache: { at: number; data: Usage } | null = null;
-let planCache: { at: number; plan: Plan } | null = null;
+let planCache: { at: number; plan: Plan; account: string | null } | null = null;
 let planInFlight: Promise<Plan> | null = null;
+
+/**
+ * The signed-in Claude account, so a switch (Config → Claude account, or cswap
+ * in a terminal) is not hidden behind the previous account's cached limits.
+ * Claude Code keeps it in .claude.json: the home directory's, or the one inside
+ * CLAUDE_CONFIG_DIR when that is set.
+ */
+function activeAccount(): string | null {
+  const dir = process.env.CLAUDE_CONFIG_DIR?.trim();
+  const file = dir ? path.join(dir, ".claude.json") : path.join(os.homedir(), ".claude.json");
+  try {
+    const id = JSON.parse(fs.readFileSync(file, "utf8"))?.oauthAccount?.accountUuid;
+    return typeof id === "string" ? id : null;
+  } catch {
+    return null;
+  }
+}
 
 const PLAN_TTL_MS = 5 * 60_000;
 const scanner = createUsageScanner({ root: path.join(os.homedir(), ".claude", "projects") });
@@ -31,6 +49,8 @@ const scanner = createUsageScanner({ root: path.join(os.homedir(), ".claude", "p
 const PLAN_GRACE_MS = 1500;
 
 async function plan(): Promise<Plan> {
+  const account = activeAccount();
+  if (planCache && planCache.account !== account) planCache = null;
   if (planCache && Date.now() - planCache.at < PLAN_TTL_MS) return planCache.plan;
   if (!planInFlight) {
     // `claude` via the same lookup the run routes use (PATH plus the usual install
@@ -38,7 +58,7 @@ async function plan(): Promise<Plan> {
     planInFlight = desktopBinaries()
       .then((desktop: string[]) => readPlanUsage({ candidates: [findBin("claude"), ...desktop].filter((b): b is string => !!b) }))
       .then((p: Plan) => {
-        planCache = { at: Date.now(), plan: p };
+        planCache = { at: Date.now(), plan: p, account };
         return p;
       })
       .finally(() => {
