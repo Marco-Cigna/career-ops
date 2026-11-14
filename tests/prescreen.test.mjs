@@ -23,6 +23,9 @@ import {
   formatDiscardLine,
   resolvePrescreenConfig,
   buildTriagePrompt,
+  buildTriageSystem,
+  buildTriageUser,
+  writeTriageSystemFile,
   parseTriageOutput,
   jdFileName,
   isLinkedInUrl,
@@ -126,11 +129,50 @@ await ok('discard lines: three fields without an id, four with one, no stray tab
 });
 
 await ok('config: defaults, bounds, and YAML booleans for triage', () => {
-  assert.deepStrictEqual(resolvePrescreenConfig({}), { spendTier: 'standard', maxYears: null, triageThreshold: 3.5, triage: 'auto', parallel: null, outputLanguage: 'en' });
+  assert.deepStrictEqual(resolvePrescreenConfig({}), { spendTier: 'standard', triageEffort: '', effort: '', maxYears: null, triageThreshold: 3.5, triage: 'auto', parallel: null, outputLanguage: 'en' });
   const c = resolvePrescreenConfig({ pipeline: { triage_threshold: 4, triage: false, parallel: 1, prescreen: { max_years: 5 } }, language: { output: 'es' } });
-  assert.deepStrictEqual(c, { spendTier: 'standard', maxYears: 5, triageThreshold: 4, triage: 'off', parallel: 1, outputLanguage: 'es' });
+  assert.deepStrictEqual(c, { spendTier: 'standard', triageEffort: '', effort: '', maxYears: 5, triageThreshold: 4, triage: 'off', parallel: 1, outputLanguage: 'es' });
   assert.strictEqual(resolvePrescreenConfig({ pipeline: { parallel: 0, triage_threshold: 9 } }).parallel, null);
   assert.strictEqual(resolvePrescreenConfig({ pipeline: { triage_threshold: 9 } }).triageThreshold, 3.5);
+});
+
+await ok('split triage prompt: the system half is posting-independent, the user half carries only the JD', () => {
+  const base = { triageMd: 'TRIAGE-MD', brief: 'BRIEF', threshold: 3.5, language: 'en' };
+  const system = buildTriageSystem(base);
+  assert.match(system, /TRIAGE-MD/);
+  assert.match(system, /BRIEF/);
+  assert.match(system, /triage_threshold for this run: 3\.5/);
+  assert.match(system, /untrusted/);
+  assert.doesNotMatch(system, /https?:\/\//, 'no URL: the same bytes for every posting');
+  const user = buildTriageUser({ jdText: 'x'.repeat(50_000), url: 'https://x.com/1' });
+  assert.match(user, /URL: https:\/\/x\.com\/1/);
+  assert.match(user, /Return only the TRIAGE line\./);
+  assert.ok(!user.includes('TRIAGE-MD') && !user.includes('BRIEF'));
+  assert.ok(user.length < 21_000, 'the JD cap still applies');
+});
+
+await ok('the triage system file is content-named: same text, same file; new text, new file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-triage-sys-'));
+  try {
+    const a = writeTriageSystemFile('same text', dir);
+    const b = writeTriageSystemFile('same text', dir);
+    const c = writeTriageSystemFile('edited brief', dir);
+    assert.strictEqual(a, b);
+    assert.notStrictEqual(a, c);
+    assert.ok(!a.includes('\\'), 'forward slashes, so a bash caller on Windows can test the path');
+    assert.strictEqual(readFileSync(a, 'utf-8'), 'same text');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+await ok('config: reasoning effort for triage and the evaluation, valid levels only', () => {
+  const c = resolvePrescreenConfig({ pipeline: { triage_effort: 'Medium', effort: ' high ' } });
+  assert.strictEqual(c.triageEffort, 'medium');
+  assert.strictEqual(c.effort, 'high');
+  const bad = resolvePrescreenConfig({ pipeline: { triage_effort: 'extreme', effort: 3 } });
+  assert.strictEqual(bad.triageEffort, '');
+  assert.strictEqual(bad.effort, '');
 });
 
 await ok('triage prompt carries all three inputs and caps the JD', () => {

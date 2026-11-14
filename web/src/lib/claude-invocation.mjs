@@ -152,15 +152,24 @@ export function grantsWriteCapability(scope) {
  *
  * `model` is the spend-tier model (pipeline-gate.mjs). Without it the CLI's own
  * default runs, which ignored config/profile.yml's spend_tier on every web run.
+ * `effort` is pipeline.effort (pipeline-gate.mjs effortForRun); null leaves the
+ * CLI's default.
  *
- * @param {{kind: string, prompt: string, model?: string | null}} args
+ * `systemPromptFile` is the evaluate worker's static context
+ * (eval-context-pack.mjs), appended to the system prompt so consecutive runs
+ * share it through the prompt cache. It is the user's own files and the
+ * checkout's, never posting text.
+ *
+ * @param {{kind: string, prompt: string, model?: string | null, effort?: string | null, systemPromptFile?: string | null}} args
  * @returns {string[]}
  */
-export function claudeCliArgs({ kind, prompt, model }) {
+export function claudeCliArgs({ kind, prompt, model, effort, systemPromptFile }) {
   const scope = toolScopeFor(kind);
   return [
     "-p", prompt,
     ...(model ? ["--model", model] : []),
+    ...(effort ? ["--effort", effort] : []),
+    ...(systemPromptFile ? ["--append-system-prompt-file", systemPromptFile] : []),
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
@@ -269,13 +278,19 @@ export function verifyClaudeArgs(args, capabilities) {
  * take a spilled prompt from. It gets no tools at all and no MCP servers, and the
  * deny list still names every restricted tool so verifyClaudeArgs can certify it.
  *
- * @param {{model: string}} args
+ * `effort` is config/profile.yml's pipeline.triage_effort; null leaves the CLI's default.
+ * `systemPromptFile` is the posting-independent half of the prompt
+ * (prescreen.mjs --triage-system-file): a cached prefix every triage shares.
+ *
+ * @param {{model: string, effort?: string | null, systemPromptFile?: string | null}} args
  * @returns {string[]}
  */
-export function claudeTriageArgs({ model }) {
+export function claudeTriageArgs({ model, effort, systemPromptFile }) {
   return [
     "-p",
     "--model", model,
+    ...(effort ? ["--effort", effort] : []),
+    ...(systemPromptFile ? ["--append-system-prompt-file", systemPromptFile] : []),
     "--strict-mcp-config",
     "--tools", "",
     "--disallowedTools", scopeFrom("").disallowed,

@@ -20,10 +20,12 @@ export const SRC = readFileSync(new URL('../../batch/batch-runner.sh', import.me
  * @param {string[]} [opts.args] - Extra runner arguments.
  * @param {string} [opts.src] - The runner source to run, SRC by default.
  * @param {boolean} [opts.rateLimitFirst] - Whether the fake CLI answers offer 1 with a 429 once.
+ * @param {Record<string, string>} [opts.env] - Extra environment. The prompt-cache warm-up is off
+ *   unless this sets CACHE_WARMUP_SECONDS: fixture workers have no cache to prime.
  * @returns {{stdout: string, starts: Record<string, number>, launches: string[]}} The
  *   runner's stdout, the live-worker count each offer saw, and launches.log if the source wrote one.
  */
-export function runBatch({ offers, args = [], src = SRC, rateLimitFirst = true }) {
+export function runBatch({ offers, args = [], src = SRC, rateLimitFirst = true, env = {} }) {
   const dir = mkdtempSync(join(tmpdir(), 'batch-default-parallel-'));
   try {
     const batchDir = join(dir, 'batch');
@@ -76,7 +78,7 @@ export function runBatch({ offers, args = [], src = SRC, rateLimitFirst = true }
     chmodSync(join(binDir, 'curl'), 0o755);
     const stdout = execFileSync(getBash(), [join(batchDir, 'batch-runner.sh'), '--max-retries', '1', '--rate-limit-sleep', '1', ...args], {
       cwd: dir,
-      env: { ...process.env, PATH: `${binDir}${delimiter}${process.env.PATH}`, FIXTURE_DIR: dir },
+      env: { ...process.env, CACHE_WARMUP_SECONDS: '0', ...env, PATH: `${binDir}${delimiter}${process.env.PATH}`, FIXTURE_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
       timeout: 60000,

@@ -710,6 +710,11 @@ const JOBS = (() => {
 // put N x N processes on N cores, and its output would stop being comparable
 // with the serial runs those suites were written against.
 process.env.CAREER_OPS_TEST_JOBS = '1';
+// batch-runner.sh holds parallel workers back for up to 40 s while the first
+// primes the prompt cache. Fixture workers have no cache, and many suites
+// assert parallel timing, so every suite inherits it off; the suite that
+// tests the warm-up sets it itself.
+process.env.CACHE_WARMUP_SECONDS ??= '0';
 
 const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only') ?? '') : null;
 

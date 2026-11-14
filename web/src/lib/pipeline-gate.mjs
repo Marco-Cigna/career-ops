@@ -36,8 +36,14 @@ export function parseConfigLines(stdout) {
 }
 
 /**
- * @typedef {{spendTier: "economy"|"standard"|"premium", parallel: number|null, triage: "auto"|"on"|"off", triageReady: boolean}} PipelineSettings
+ * @typedef {"low"|"medium"|"high"|"xhigh"|"max"} Effort
+ * @typedef {{spendTier: "economy"|"standard"|"premium", parallel: number|null, triage: "auto"|"on"|"off", triageReady: boolean, triageEffort: Effort|null, effort: Effort|null}} PipelineSettings
  */
+
+/** Claude Code's --effort levels (prescreen.mjs EFFORT_LEVELS). */
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+/** @returns {Effort|null} */
+const effortFrom = (value) => (EFFORTS.includes(value) ? /** @type {Effort} */ (value) : null);
 
 /** @returns {PipelineSettings} */
 export function pipelineSettings(stdout) {
@@ -49,6 +55,8 @@ export function pipelineSettings(stdout) {
     parallel: Number.isInteger(parallel) && parallel >= 1 ? parallel : null,
     triage: raw.TRIAGE === "on" || raw.TRIAGE === "off" ? raw.TRIAGE : "auto",
     triageReady: raw.TRIAGE_READY === "1",
+    triageEffort: effortFrom(raw.TRIAGE_EFFORT),
+    effort: effortFrom(raw.EFFORT),
   };
 }
 
@@ -57,11 +65,35 @@ export function modelForRun(cliId, settings) {
   return cliId === "claude" && settings ? TIER_MODELS[settings.spendTier] : null;
 }
 
+/** pipeline.effort, for the same runs modelForRun picks a model for. Null = the CLI's default. */
+export function effortForRun(cliId, settings) {
+  return cliId === "claude" && settings ? settings.effort : null;
+}
+
 /** Same decision as resolve_triage in batch-runner.sh. */
 export function triageEnabled(cliId, settings) {
   if (cliId !== "claude" || !settings || settings.triage === "off" || !settings.triageReady) return false;
   // At the economy tier the full evaluation already runs on that model.
   return settings.triage === "on" || settings.spendTier !== "economy";
+}
+
+/**
+ * The triage prompt as `{user, systemFile}`. The split form (prescreen.mjs
+ * --triage-system-file / --triage-user) needs a real .md path back; anything
+ * else falls back to the single-message prompt with no system file.
+ * @returns {Promise<{user: string, systemFile: string|null} | null>}
+ */
+export async function triagePrompt(runCore, inputFile, jdFile) {
+  try {
+    const system = await runCore("prescreen", ["--triage-system-file", "--input", inputFile]);
+    const systemFile = system.code === 0 ? system.stdout.trim() : "";
+    if (/^(?:[A-Za-z]:)?[\\/].+\.md$/.test(systemFile) && !/[\r\n]/.test(systemFile)) {
+      const user = await runCore("prescreen", ["--triage-user", "--input", inputFile, "--jd-file", jdFile]);
+      if (user.code === 0 && user.stdout.trim()) return { user: user.stdout, systemFile };
+    }
+  } catch { /* fall back below */ }
+  const built = await runCore("prescreen", ["--triage-prompt", "--input", inputFile, "--jd-file", jdFile]);
+  return built.code === 0 && built.stdout.trim() ? { user: built.stdout, systemFile: null } : null;
 }
 
 /** Last `TRIAGE: VERDICT | company | role | N/5 | reason` line. Mirrors parseTriageOutput in prescreen.mjs. */
@@ -89,7 +121,7 @@ const clip = (text) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 6
  * @param {string} deps.discardLog absolute path of data/discard.log
  * @param {(script: string, args: string[]) => Promise<{code: number, stdout: string, timedOut?: boolean, spawnFailed?: boolean}>} deps.runCore
  * @param {(name: string, text: string) => string} deps.writeScratch writes a scratch file, returns its path
- * @param {(prompt: string, model: string) => Promise<string>} deps.runTriage economy-model call; resolves to its stdout
+ * @param {(prompt: string, model: string, effort: Effort|null, systemFile?: string|null) => Promise<string>} deps.runTriage economy-model call; resolves to its stdout
  * @returns {Promise<GateResult>}
  */
 export async function runPipelineGate({ url, jdText, cliId, settings, discardLog, runCore, writeScratch, runTriage }) {
@@ -117,12 +149,15 @@ export async function runPipelineGate({ url, jdText, cliId, settings, discardLog
       notes.push("Triage skipped: the posting text was not available before the run.");
       return { skip: false, notes };
     }
-    const built = await runCore("prescreen", ["--triage-prompt", "--input", inputFile, "--jd-file", jdFile]);
-    if (built.code !== 0 || !built.stdout.trim()) {
+    // Split prompt first: the posting-independent half as a system-prompt file
+    // (a cached prefix shared by every triage), the JD as the message. An older
+    // core without the split flags falls back to the one-message prompt.
+    const prompt = await triagePrompt(runCore, inputFile, jdFile);
+    if (!prompt) {
       notes.push("Triage prompt could not be built; continuing to the evaluation.");
       return { skip: false, notes };
     }
-    const triage = parseTriage(await runTriage(built.stdout, TIER_MODELS.economy));
+    const triage = parseTriage(await runTriage(prompt.user, TIER_MODELS.economy, settings?.triageEffort ?? null, prompt.systemFile));
     if (!triage) {
       notes.push("Triage gave no verdict; continuing to the evaluation.");
       return { skip: false, notes };

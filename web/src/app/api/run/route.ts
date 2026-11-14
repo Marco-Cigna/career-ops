@@ -19,6 +19,8 @@ import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { writeEvalContextPack } from "@/lib/eval-context-pack.mjs";
+import { fillJdArchive } from "@/lib/jd-archive-fill.mjs";
 import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
@@ -33,7 +35,7 @@ import { readJsonObject } from "@/lib/json-body";
 import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.mjs";
 import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
-import { modelForRun } from "@/lib/pipeline-gate.mjs";
+import { effortForRun, modelForRun } from "@/lib/pipeline-gate.mjs";
 import { agentMode } from "@/lib/tools-catalog.mjs";
 import { gateEvaluation, loadPipelineSettings } from "@/lib/pipeline-gate-run";
 
@@ -215,6 +217,9 @@ export async function POST(req: Request) {
   let child;
   // Status lines from the cost gate, shown at the top of the run log.
   let gateNotes: string[] = [];
+  // The prefetched posting text, kept for the save step: the worker writes a
+  // marker where the archive goes and the platform fills it (jd-archive-fill.mjs).
+  let jdForArchive: string | null = null;
   let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
   let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
@@ -234,8 +239,15 @@ export async function POST(req: Request) {
       if (writeToken !== null) releaseTrackerWrite(writeToken);
       return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
     }
+    // A headless browser rendered the page and found no posting on it: a model
+    // run would only rediscover that through WebFetch, at full context cost.
+    if (prefetch?.unreadable) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return Response.json({ error: `Not scored: ${prefetch.unreadable}. No AI run was started, so nothing was spent. Open the posting to check it is still live; if the job text sits in an embedded job board, evaluate that board's own link, or evaluate it from your agent CLI with the job text pasted in.` }, { status: 422 });
+    }
     const prefetchedJd = prefetch?.text ?? null;
     const closedEvidence = prefetch?.closedEvidence ?? null;
+    jdForArchive = prefetchedJd;
     // spend_tier and the pipeline block. Read once: it picks the model for this
     // run and decides whether the triage pass below runs.
     const settings = await loadPipelineSettings();
@@ -263,10 +275,26 @@ export async function POST(req: Request) {
       gateNotes = gate.notes;
     }
     const model = modelForRun(cliId, settings);
-    if (model) gateNotes.push(`Model: ${model} (spend_tier: ${settings?.spendTier})`);
+    const effort = effortForRun(cliId, settings);
+    if (model) gateNotes.push(`Model: ${model} (spend_tier: ${settings?.spendTier})${effort ? `, effort: ${effort}` : ""}`);
     if (evaluationInstructions) {
       instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
     }
+    // The evaluate worker's static context (mode, shared rules, schema, CV,
+    // profile, house rules) goes in its system prompt instead of being read with
+    // tool calls, so consecutive evaluations share it through the prompt cache
+    // (eval-context-pack.mjs). Claude only: it is the CLI with a system-prompt
+    // file flag. A pack that cannot be built leaves the old read-it-yourself prompt.
+    const contextPack = kind === "evaluate" && cliId === "claude" && !closedEvidence
+      ? writeEvalContextPack({
+          codeRoot,
+          dataRoot: careerOpsRoot(),
+          profilePath: getProfilePath(careerOpsRoot()),
+          evalModeFile: lang.evalModeFile,
+          marketDirs: lang.modesDirs,
+        })
+      : null;
+    if (contextPack) gateNotes.push(`Context: reference pack ${contextPack.hash} (about ${Math.round(contextPack.chars / 4000)}k tokens, shared across runs through the prompt cache)`);
     const prompt = buildPrompt({
       kind,
       input,
@@ -286,6 +314,7 @@ export async function POST(req: Request) {
       evaluationInstructions: instructionFile?.reference,
       prefetchedJd,
       closedEvidence,
+      contextPack: contextPack !== null,
     });
 
     const isClaude = cliId === "claude";
@@ -303,7 +332,7 @@ export async function POST(req: Request) {
     // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
     // envelope-parsing routes rely on.
     const buildArgs = (p: string) =>
-      isClaude ? claudeCliArgs({ kind, prompt: p, model }) : (spec.streamArgs ?? spec.args)(p);
+      isClaude ? claudeCliArgs({ kind, prompt: p, model, effort, systemPromptFile: contextPack?.file }) : (spec.streamArgs ?? spec.args)(p);
     // The prompt inlines the whole _profile.md (#4003), so it can outgrow the OS
     // command-line limit (ENAMETOOLONG on Windows). Every kind that reaches here
     // can Read (see TOOL_SCOPES), so an oversized prompt goes to a file under the
@@ -567,8 +596,10 @@ export async function POST(req: Request) {
       // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
       // successful render, not optimistically — same honesty-gate discipline as
       // persistEval below.
-      const persistEval = async (markdown: string) => {
+      const persistEval = async (emitted: string) => {
         send({ type: "status", label: "Saving report…" });
+        // The exact posting text goes where the worker left the archive marker.
+        const { markdown } = fillJdArchive(emitted, jdForArchive);
         try {
           const result = await persistEvaluation({
             spawnFn: spawn,

@@ -189,7 +189,7 @@ const CALL_SITES = [
     source: 'web/src/lib/core-cli.ts',
     argvSource: 'web/src/lib/pipeline-gate.mjs',
     script: 'prescreen.mjs',
-    args: ['--input', 'in.json', '--log', 'discard.log', '--json', '--jd-file', 'jd.txt', '--triage-prompt'],
+    args: ['--input', 'in.json', '--log', 'discard.log', '--json', '--jd-file', 'jd.txt', '--triage-prompt', '--triage-system-file', '--triage-user'],
     probe: 'flags-only',
   },
   {

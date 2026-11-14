@@ -14,6 +14,17 @@ import { CAPS } from "@/lib/worker-capabilities.mjs";
 
 const TRIAGE_TIMEOUT_MS = 300_000;
 
+/**
+ * One fixed, empty working directory for every triage call. Claude Code writes
+ * its working directory into the system prompt, so the per-run scratch folder
+ * this used to be made every triage prompt different from its first line and
+ * none ever read the prompt cache (measured: 649 of ~10k tokens). With a fixed
+ * folder, the system prompt, modes/triage.md and the brief are one shared,
+ * cached prefix and only the JD at the end is new. Nothing is written to it.
+ * Same folder name batch-runner.sh uses, so terminal and web triage share it.
+ */
+export const TRIAGE_CWD = path.join(os.tmpdir(), "career-ops-triage-cwd");
+
 /** config/profile.yml's spend tier and pipeline block, or null when it cannot be read. */
 export async function loadPipelineSettings(): Promise<PipelineSettings | null> {
   try {
@@ -25,7 +36,7 @@ export async function loadPipelineSettings(): Promise<PipelineSettings | null> {
 }
 
 /** One no-tools call on the economy model. Resolves to its stdout, "" on any failure. */
-function callTriageModel(binPath: string, cwd: string, prompt: string, model: string, signal?: AbortSignal): Promise<string> {
+function callTriageModel(binPath: string, cwd: string, prompt: string, model: string, effort: string | null, systemFile: string | null, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve) => {
     let out = "";
     let settled = false;
@@ -40,11 +51,12 @@ function callTriageModel(binPath: string, cwd: string, prompt: string, model: st
     const onAbort = () => { try { child?.kill("SIGTERM"); } catch { /* ignore */ } finish(""); };
     const timer = setTimeout(onAbort, TRIAGE_TIMEOUT_MS);
     try {
-      // An empty scratch directory as cwd: the prompt carries everything, so the
-      // worker loads no project instructions. No tools, no MCP servers.
+      // The fixed, empty TRIAGE_CWD: the prompt carries everything, so the worker
+      // loads no project instructions, and the prefix stays cacheable. No tools,
+      // no MCP servers.
       child = spawnHeadlessCli(
         binPath,
-        claudeTriageArgs({ model }),
+        claudeTriageArgs({ model, effort, systemPromptFile: systemFile }),
         { cwd, env: process.env },
         { cliId: "claude", capabilities: CAPS.localReadOnly },
         { input: prompt },
@@ -95,10 +107,9 @@ export async function gateEvaluation(opts: {
         fs.writeFileSync(file, text);
         return file;
       },
-      runTriage: (prompt, model) => {
-        const cwd = path.join(scratch, "cwd");
-        fs.mkdirSync(cwd, { recursive: true });
-        return callTriageModel(opts.binPath, cwd, prompt, model, opts.signal);
+      runTriage: (prompt, model, effort, systemFile) => {
+        fs.mkdirSync(TRIAGE_CWD, { recursive: true });
+        return callTriageModel(opts.binPath, TRIAGE_CWD, prompt, model, effort, systemFile ?? null, opts.signal);
       },
     });
     if (result.skip) {

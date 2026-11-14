@@ -133,6 +133,7 @@ MODE="full"
 MODEL=""  # explicit override; otherwise resolved from the profile's spend_tier
 RESOLVED_MODEL=""
 RESOLVED_SPEND_TIER=""
+RESOLVED_EFFORT=""     # claude --effort for workers: the profile's pipeline.effort; empty = CLI default
 CLI=claude
 RATE_LIMIT_SLEEP=300
 WORKER_TIMEOUT=1800
@@ -141,6 +142,7 @@ PRESCREEN=true         # zero-token rule gate (prescreen.mjs) before any model c
 TRIAGE_MODE=""         # auto | on | off: economy-model triage pass; empty = profile pipeline.triage, else auto
 TRIAGE_ENABLED=false
 TRIAGE_MODEL=""
+TRIAGE_EFFORT=""       # claude --effort for triage: the profile's pipeline.triage_effort; empty = CLI default
 TRIAGE_THRESHOLD=""
 MAX_YEARS=""
 BATCH_PAUSED=false
@@ -174,6 +176,9 @@ Options:
   --parallel N         Number of parallel workers (default: pipeline.parallel in
                        config/profile.yml, else 3 for claude, 1 otherwise).
                        On a rate limit, the rest of the batch runs on 1 worker.
+                       With more than 1, the first worker starts alone for up
+                       to CACHE_WARMUP_SECONDS (default 40, 0 = off) so the
+                       others read its prompt cache instead of rewriting it.
   --no-prescreen       Skip the zero-token rule gate (prescreen.mjs: blacklist,
                        vetoed title, years above pipeline.prescreen.max_years)
   --triage MODE        Economy-model triage pass before the full evaluation:
@@ -822,6 +827,8 @@ resolve_worker_model() {
     return 0
   fi
 
+  # --effort is a claude flag, independent of which model runs.
+  RESOLVED_EFFORT="$(prescreen_config_value EFFORT)"
   RESOLVED_SPEND_TIER="$(read_spend_tier)"
   RESOLVED_MODEL="$(spend_tier_to_model "$RESOLVED_SPEND_TIER")"
 }
@@ -838,6 +845,7 @@ resolve_triage() {
   mode="${mode:-auto}"
   TRIAGE_ENABLED=false
   TRIAGE_MODEL="$(spend_tier_to_model economy)"
+  TRIAGE_EFFORT="$(prescreen_config_value TRIAGE_EFFORT)"
   [[ "$mode" == "off" ]] && return 0
   if [[ "$CLI" != "claude" || "${MODE:-full}" != "full" ]]; then
     [[ "$mode" == "on" ]] && echo "WARN: --triage on needs --cli claude and --mode full; triage is off for this run." >&2
@@ -862,19 +870,38 @@ resolve_triage() {
 # returned no TRIAGE line. The worker runs from an empty temp directory so it
 # loads no project CLAUDE.md (the triage prompt carries all it needs), with
 # every tool disabled and no MCP servers. The raw output goes to $3.
+# The directory is the SAME one every call: Claude Code writes its working
+# directory into the system prompt, so a fresh mktemp -d per call made every
+# prompt different from its first line and no triage ever read the prompt
+# cache (measured: 649 of ~10k tokens). With one fixed directory the system
+# prompt, triage.md and the brief are a shared, cached prefix; only the JD at
+# the end is new. Nothing is ever written to it.
 run_triage() {
   local url="$1" jd_file="$2" triage_log="$3"
-  local prompt_file triage_cwd
+  local prompt_file triage_cwd system_file=""
+  local -a system_args=()
   prompt_file="$(mktemp "${TMPDIR:-/tmp}/batch-triage-prompt.XXXXXX")"
-  if ! node "$PROJECT_DIR/prescreen.mjs" --triage-prompt --url "$url" --jd-file "$jd_file" > "$prompt_file" 2>/dev/null; then
+  # Split prompt: instructions + brief as a system-prompt file (one content-named
+  # file, a cached prefix every triage shares) and only the JD as the message.
+  # Falls back to the one-message prompt if the split is unavailable.
+  system_file="$(node "$PROJECT_DIR/prescreen.mjs" --triage-system-file --url "$url" 2>/dev/null)" || system_file=""
+  if [[ -n "$system_file" && -f "$system_file" ]] \
+    && node "$PROJECT_DIR/prescreen.mjs" --triage-user --url "$url" --jd-file "$jd_file" > "$prompt_file" 2>/dev/null; then
+    system_args=(--append-system-prompt-file "$system_file")
+  elif ! node "$PROJECT_DIR/prescreen.mjs" --triage-prompt --url "$url" --jd-file "$jd_file" > "$prompt_file" 2>/dev/null; then
     rm -f "$prompt_file"
     return 0
   fi
-  triage_cwd="$(mktemp -d "${TMPDIR:-/tmp}/batch-triage-cwd.XXXXXX")"
+  triage_cwd="${TMPDIR:-/tmp}/career-ops-triage-cwd"
+  mkdir -p "$triage_cwd" 2>/dev/null || triage_cwd="$(mktemp -d "${TMPDIR:-/tmp}/batch-triage-cwd.XXXXXX")"
   local -a timeout_cmd=()
   command -v timeout >/dev/null 2>&1 && timeout_cmd=(timeout 300)
-  ( cd "$triage_cwd" && ${timeout_cmd[@]+"${timeout_cmd[@]}"} claude -p --model "$TRIAGE_MODEL" --strict-mcp-config --tools "" < "$prompt_file" ) > "$triage_log" 2>&1 || true
-  rm -rf "$prompt_file" "$triage_cwd"
+  local -a effort_args=()
+  [[ -n "$TRIAGE_EFFORT" ]] && effort_args=(--effort "$TRIAGE_EFFORT")
+  ( cd "$triage_cwd" && ${timeout_cmd[@]+"${timeout_cmd[@]}"} claude -p --model "$TRIAGE_MODEL" ${effort_args[@]+"${effort_args[@]}"} ${system_args[@]+"${system_args[@]}"} --strict-mcp-config --tools "" < "$prompt_file" ) > "$triage_log" 2>&1 || true
+  # The fixed triage directory stays (see above); only a mktemp fallback is removed.
+  rm -f "$prompt_file"
+  [[ "$triage_cwd" == *"/batch-triage-cwd."* ]] && rm -rf "$triage_cwd"
   node "$PROJECT_DIR/prescreen.mjs" --parse-triage < "$triage_log" 2>/dev/null || true
 }
 
@@ -1753,7 +1780,22 @@ process_offer() {
         {
           printf '\n\n---\n\n'
           printf '## Runtime personalization: %s\n\n' "${context_file#"$DATA_ROOT/"}"
-          sed 's/^/    /' "$context_file"
+          if [[ "$context_file" == "$PROFILE_FILE" ]]; then
+            # The profile as data, without its template commentary (about 6k
+            # tokens down to 1k on a real profile), paid on every worker turn.
+            # Deterministic, so the prompt stays byte-identical across offers.
+            # Any failure falls back to the file as written.
+            local compact_profile=""
+            compact_profile="$(node "$PROJECT_DIR/lib/profile-compact.mjs" "$context_file" 2>/dev/null)" || compact_profile=""
+            if [[ -n "$compact_profile" ]]; then
+              printf '(parsed, comments removed)\n\n'
+              printf '%s\n' "$compact_profile" | sed 's/^/    /'
+            else
+              sed 's/^/    /' "$context_file"
+            fi
+          else
+            sed 's/^/    /' "$context_file"
+          fi
           printf '\n'
         } >> "$resolved_prompt"
       fi
@@ -1783,6 +1825,9 @@ process_offer() {
   local -a claude_args=(-p --dangerously-skip-permissions --strict-mcp-config)
   if [[ -n "$RESOLVED_MODEL" ]]; then
     claude_args+=(--model "$RESOLVED_MODEL")
+  fi
+  if [[ -n "$RESOLVED_EFFORT" ]]; then
+    claude_args+=(--effort "$RESOLVED_EFFORT")
   fi
   claude_args+=(--append-system-prompt-file "$resolved_prompt" "$prompt")
 
@@ -2709,6 +2754,24 @@ main() {
       pids+=($!)
       pid_ids+=("${pending_ids[$i]}")
       running=$((running + 1))
+
+      # Prompt-cache warm-up: every worker shares one byte-identical system
+      # prompt, but workers started together all find the cache empty and each
+      # pays to write the whole prefix (~100k tokens apiece). Let the first
+      # worker of the run reach the API alone; the rest then read its cache.
+      # Ends early if that worker finishes. CACHE_WARMUP_SECONDS=0 turns it off.
+      if (( PARALLEL > 1 )) && [[ "${WARMUP_DONE:-false}" != "true" ]]; then
+        WARMUP_DONE=true
+        local warmup_left="${CACHE_WARMUP_SECONDS:-40}"
+        [[ "$warmup_left" =~ ^[0-9]+$ ]] || warmup_left=40
+        if (( warmup_left > 0 )); then
+          echo "    ⏳ Cache warm-up: starting other workers in ${warmup_left}s, after the first one primes the shared prompt"
+        fi
+        while (( warmup_left > 0 )) && kill -0 "$!" 2>/dev/null; do
+          sleep 1
+          warmup_left=$((warmup_left - 1))
+        done
+      fi
     done
 
     # Wait for remaining workers

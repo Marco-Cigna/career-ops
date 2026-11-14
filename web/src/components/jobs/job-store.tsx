@@ -10,11 +10,13 @@ import type { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
 import { createRunQueue } from "@/lib/run-queue.mjs";
 
 // One queue for the whole tab: queued evaluations share pipeline.parallel slots.
+// With more than one slot, the first job of a cold burst runs alone for 40s so
+// the others read its prompt cache instead of each writing it (run-queue.mjs).
 const runQueue = createRunQueue(async () => {
   const res = await fetch("/api/run/limits");
   const data = res.ok ? await res.json() : null;
   return typeof data?.parallel === "number" ? data.parallel : 1;
-});
+}, { warmupMs: 40_000 });
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobGate = { reason: (typeof EVALUATION_GATE_REASONS)[number]; message: string; confirmationRequired: boolean };
