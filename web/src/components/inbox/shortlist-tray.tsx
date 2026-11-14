@@ -8,6 +8,7 @@ import { CostBadge } from "@/components/cost/cost-badge";
 import { cn } from "@/lib/cn";
 import { formatRunCostEstimate } from "@/lib/run-cost-estimate.mjs";
 import { EvaluationOptions } from "@/components/evaluation-options";
+import { ScoringTips } from "./scoring-tips";
 
 export type ShortItem = { url: string; company: string; role: string };
 
@@ -46,6 +47,7 @@ export function ShortlistTray({
         <div className="border-t border-border bg-surface shadow-lg shadow-black/10 sm:rounded-2xl sm:border">
           {confirming && (
             <div className="max-h-[55vh] overflow-y-auto border-b border-border px-3 py-3 sm:px-4">
+              <ScoringTips items={items} sections={sections} />
               <EvaluationOptions sections={sections} onChange={onSectionsChange} />
             </div>
           )}
