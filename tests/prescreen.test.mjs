@@ -129,9 +129,10 @@ await ok('discard lines: three fields without an id, four with one, no stray tab
 });
 
 await ok('config: defaults, bounds, and YAML booleans for triage', () => {
-  assert.deepStrictEqual(resolvePrescreenConfig({}), { spendTier: 'standard', triageEffort: '', effort: '', maxYears: null, triageThreshold: 3.5, triage: 'auto', parallel: null, outputLanguage: 'en' });
+  const noCodex = { codexModel: '', codexEffort: '', codexTriageModel: '', codexTriageEffort: '' };
+  assert.deepStrictEqual(resolvePrescreenConfig({}), { spendTier: 'standard', triageEffort: '', effort: '', ...noCodex, maxYears: null, triageThreshold: 3.5, triage: 'auto', parallel: null, outputLanguage: 'en' });
   const c = resolvePrescreenConfig({ pipeline: { triage_threshold: 4, triage: false, parallel: 1, prescreen: { max_years: 5 } }, language: { output: 'es' } });
-  assert.deepStrictEqual(c, { spendTier: 'standard', triageEffort: '', effort: '', maxYears: 5, triageThreshold: 4, triage: 'off', parallel: 1, outputLanguage: 'es' });
+  assert.deepStrictEqual(c, { spendTier: 'standard', triageEffort: '', effort: '', ...noCodex, maxYears: 5, triageThreshold: 4, triage: 'off', parallel: 1, outputLanguage: 'es' });
   assert.strictEqual(resolvePrescreenConfig({ pipeline: { parallel: 0, triage_threshold: 9 } }).parallel, null);
   assert.strictEqual(resolvePrescreenConfig({ pipeline: { triage_threshold: 9 } }).triageThreshold, 3.5);
 });
@@ -173,6 +174,20 @@ await ok('config: reasoning effort for triage and the evaluation, valid levels o
   const bad = resolvePrescreenConfig({ pipeline: { triage_effort: 'extreme', effort: 3 } });
   assert.strictEqual(bad.triageEffort, '');
   assert.strictEqual(bad.effort, '');
+});
+
+await ok('config: codex model and reasoning effort, for the evaluation and the triage pass', () => {
+  const c = resolvePrescreenConfig({ pipeline: { codex: { model: ' gpt-6.1-sol ', effort: 'High', triage_model: 'gpt-6-luna', triage_effort: 'high' } } });
+  assert.deepStrictEqual(
+    [c.codexModel, c.codexEffort, c.codexTriageModel, c.codexTriageEffort],
+    ['gpt-6.1-sol', 'high', 'gpt-6-luna', 'high'],
+  );
+  // ultra is a codex level, not a claude one.
+  assert.strictEqual(resolvePrescreenConfig({ pipeline: { codex: { effort: 'ultra' }, effort: 'ultra' } }).codexEffort, 'ultra');
+  assert.strictEqual(resolvePrescreenConfig({ pipeline: { effort: 'ultra' } }).effort, '');
+  // Anything that is not a bare slug never reaches a command line.
+  const bad = resolvePrescreenConfig({ pipeline: { codex: { model: 'gpt x; rm', effort: 'extreme', triage_model: '-c sandbox_mode=danger', triage_effort: 5 } } });
+  assert.deepStrictEqual([bad.codexModel, bad.codexEffort, bad.codexTriageModel, bad.codexTriageEffort], ['', '', '', '']);
 });
 
 await ok('triage prompt carries all three inputs and caps the JD', () => {

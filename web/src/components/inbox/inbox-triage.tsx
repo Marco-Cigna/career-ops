@@ -14,8 +14,9 @@ import { orderInbox } from "@/lib/core/inbox-rank.mjs";
 import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
-import { TriageRow, type RowScore } from "./triage-row";
+import { ACTIONS_WIDTH, ADDED_WIDTH, TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
+import { InboxFilter, type FilterOutcome } from "./inbox-filter";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "@/lib/inbox-skip-client.mjs";
@@ -46,7 +47,11 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const [sortMode, setSortMode] = useState<"fit" | "newest">("fit");
+  const [sortMode, setSortMode] = useState<"fit" | "newest" | "added">("fit");
+  // Filter results from this session, ahead of the page refresh that brings them
+  // in from data/inbox-triage.json; and the All / Passed filter view.
+  const [live, setLive] = useState<Map<string, FilterOutcome>>(() => new Map());
+  const [view, setView] = useState<"all" | "passed">("all");
 
   // persisted triage state + ephemeral selection/undo
   const [shortlist, setShortlist] = useState<ShortItem[]>([]);
@@ -118,13 +123,20 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const enriched = useMemo(() => {
     const seen = new Set<string>();
     const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null }[] = [];
-    for (const job of inbox) {
-      if (seen.has(job.url)) continue;
-      seen.add(job.url);
-      out.push({ job, source: sourceFromUrl(job.url), seniority: seniorityFromTitle(job.role), age: daysSince(job.postedAt, now) });
+    for (const raw of inbox) {
+      if (seen.has(raw.url)) continue;
+      seen.add(raw.url);
+      // Removed by the Filter this session: already ticked off on disk.
+      const result = live.get(raw.url);
+      if (result?.outcome === "removed") continue;
+      const job: InboxJob = result && result.outcome !== "error"
+        ? { ...raw, triage: { verdict: result.outcome === "passed" ? "PASS" : "UNCHECKED", score: result.score ?? null, reason: result.reason ?? "", at: "" } }
+        : raw;
+      // Freshness: the employer's posting date, else the day a scan added it.
+      out.push({ job, source: sourceFromUrl(job.url), seniority: seniorityFromTitle(job.role), age: daysSince(job.postedAt ?? job.addedAt, now) });
     }
     return out;
-  }, [inbox, now]);
+  }, [inbox, now, live]);
 
   // EVALUADA lookup: the latest evaluate worker per posting URL (running → badge).
   const scoreByUrl = useMemo(() => {
@@ -140,6 +152,30 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     }
     return m;
   }, [jobs]);
+
+  // What the Filter button works on: rows still in the inbox, not hidden, not
+  // already scored, and never filtered (or only "couldn't read", worth a retry).
+  const filterCandidates = useMemo(
+    () => enriched
+      .filter((e) => !hidden.includes(e.job.url)
+        && !inboxScoreTarget(scoreByUrl.get(e.job.url)).evaluated
+        && (!e.job.triage || (e.job.triage.verdict === "UNCHECKED" && !live.has(e.job.url))))
+      .map((e) => e.job),
+    [enriched, hidden, scoreByUrl, live],
+  );
+  const passedCount = useMemo(
+    () => enriched.filter((e) => !hidden.includes(e.job.url) && e.job.triage?.verdict === "PASS").length,
+    [enriched, hidden],
+  );
+  const onFilterResult = (url: string, result: FilterOutcome) =>
+    setLive((current) => new Map(current).set(url, result));
+  const onFilterFinished = (p: { passed: number; removed: number }) => {
+    if (p.passed > 0) {
+      setView("passed");
+      setShowAll(true);
+    }
+    if (p.removed > 0 || p.passed > 0) router.refresh();
+  };
 
   // facet options — only surface what's actually present in the (non-hidden) data
   const availSources = useMemo(() => {
@@ -157,6 +193,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     () =>
       enriched.filter((e) => {
         if (hidden.includes(e.job.url)) return false;
+        if (view === "passed" && e.job.triage?.verdict !== "PASS") return false;
         if (within != null && (e.age == null || e.age > within)) return false;
         if (sources.size && (!e.source || !sources.has(e.source))) return false;
         if (seniorities.size && (!e.seniority || !seniorities.has(e.seniority))) return false;
@@ -164,15 +201,21 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         if (kw.trim() && !`${e.job.company} ${e.job.role}`.toLowerCase().includes(kw.trim().toLowerCase())) return false;
         return true;
       }),
-    [enriched, hidden, within, sources, seniorities, locQ, kw],
+    [enriched, hidden, within, sources, seniorities, locQ, kw, view],
   );
 
-  // Fit order lives in core/inbox-rank.mjs. This is the only sort.
-  const ordered = useMemo(() => orderInbox(filtered.map((entry) => ({
-    ...entry,
-    postedAt: entry.job.postedAt,
-    fit: entry.job.fit ?? null,
-  })), sortMode), [filtered, sortMode]);
+  // Fit order lives in core/inbox-rank.mjs. "Just added" orders by the day a
+  // scan added each row, best fit first within a day (orderInbox breaks date
+  // ties by input order, and the input is the fit order).
+  const ordered = useMemo(() => {
+    const fitOrMode = orderInbox(filtered.map((entry) => ({
+      ...entry,
+      postedAt: entry.job.postedAt ?? entry.job.addedAt,
+      fit: entry.job.fit ?? null,
+    })), sortMode === "added" ? "fit" : sortMode);
+    if (sortMode !== "added") return fitOrMode;
+    return orderInbox(fitOrMode.map((entry) => ({ ...entry, postedAt: entry.job.addedAt })), "newest");
+  }, [filtered, sortMode]);
 
   const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
   // Keep the batch cap with filters on too: filters sit under the list, so an
@@ -185,6 +228,10 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   useEffect(() => {
     setShowAll(false);
   }, [within, sources, seniorities, locQ, kw]);
+  // The Passed filter view is already the short list: show all of it.
+  useEffect(() => {
+    setShowAll(view === "passed");
+  }, [view]);
   // Chip/facet changes only — scrolling on every locQ/kw keystroke pulls the
   // focused text input out of view while the user is still typing.
   useEffect(() => {
@@ -392,15 +439,25 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
+      {/* Filter (rules + triage) and the view it produces */}
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <InboxFilter candidates={filterCandidates} onResult={onFilterResult} onFinished={onFilterFinished} />
+        <div role="group" aria-label="Inbox view" className="flex items-center gap-2 text-xs">
+          <button type="button" aria-pressed={view === "all"} onClick={() => setView("all")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px]", view === "all" ? "font-medium text-foreground" : "text-faint")}>All</button>
+          <button type="button" aria-pressed={view === "passed"} onClick={() => setView("passed")} disabled={passedCount === 0} className={cn("inline-flex items-center hover:text-foreground disabled:cursor-default disabled:opacity-50 max-sm:min-h-[44px]", view === "passed" ? "font-medium text-foreground" : "text-faint")}>Passed filter ({passedCount})</button>
+        </div>
+      </div>
+
       {/* batch header: fresh/filtered slice by default; "See all" lifts the cap */}
       <div ref={listTopRef} className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
-          {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : capped ? (sortMode === "newest" ? "Fresh — worth a look" : "Best fits") : "All roles"}
+          {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : view === "passed" ? `${filtered.length} passed the filter` : capped ? (sortMode === "newest" ? "Fresh — worth a look" : sortMode === "added" ? "Just added" : "Best fits") : "All roles"}
         </p>
         <div className="flex items-center gap-3">
           <div role="group" aria-label="Sort inbox" className="flex items-center gap-2 text-xs">
             <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
-            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")}>Newest</button>
+            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")} title="By the employer's posting date">Newest</button>
+            <button type="button" aria-pressed={sortMode === "added"} onClick={() => setSortMode("added")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "added" ? "font-medium text-foreground" : "text-faint")} title="By the day a scan added it to your inbox">Just added</button>
           </div>
           {hiddenCount > 0 && (
             <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">
@@ -427,7 +484,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       )}
 
       {visible.length > 0 ? (
-        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
+        <>
+        {/* Column labels. Same padding and gaps as TriageRow, so "Added" sits over its column. */}
+        <div aria-hidden className="mt-3 flex items-center gap-2.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-faint sm:gap-3 sm:px-4">
+          <span className="flex-1">Job</span>
+          <span className={cn("shrink-0 text-right", ADDED_WIDTH)}>Added</span>
+          <span className={cn("shrink-0", ACTIONS_WIDTH)} />
+        </div>
+        <ul className="mt-1 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
           {visible.map((e, index) => (
             <TriageRow
               key={e.job.url}
@@ -435,7 +499,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               cursor={cursor === index}
               job={e.job}
               source={e.source}
-              age={e.age}
+              age={e.job.postedAt ? e.age : null}
+              now={now}
               reason={e.fit?.reason ?? ""}
               scored={scoreByUrl.get(e.job.url)}
               selected={selected.has(e.job.url)}
@@ -446,6 +511,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
             />
           ))}
         </ul>
+        </>
       ) : (
         <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
           <p className="font-display text-lg">No matches</p>

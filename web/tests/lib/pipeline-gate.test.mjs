@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { TIER_MODELS, effortForRun, modelForRun, parseTriage, pipelineSettings, runPipelineGate, triageEnabled } from "../../src/lib/pipeline-gate.mjs";
+import { TIER_MODELS, effortForRun, modelForRun, parseTriage, pipelineSettings, runPipelineGate, triageEnabled, triageModelFor } from "../../src/lib/pipeline-gate.mjs";
+import { codexStreamArgs, codexTriageArgs } from "../../src/lib/run-cli-support.mjs";
+import { fenceArgs } from "../../src/lib/cli-fencing.mjs";
+import { CAPS } from "../../src/lib/worker-capabilities.mjs";
 import { claudeCliArgs, claudeTriageArgs, claudeWebSearchArgs, verifyClaudeArgs, argValue } from "../../src/lib/claude-invocation.mjs";
 import { createRunQueue } from "../../src/lib/run-queue.mjs";
 
@@ -28,8 +31,62 @@ function deps(overrides = {}) {
 }
 
 test("settings read the spend tier, parallel limit and triage switches", () => {
-  assert.deepEqual(settings, { spendTier: "standard", parallel: 1, triage: "auto", triageReady: true, triageEffort: null, effort: null });
-  assert.deepEqual(pipelineSettings(""), { spendTier: "standard", parallel: null, triage: "auto", triageReady: false, triageEffort: null, effort: null });
+  const noCodex = { model: null, effort: null, triageModel: null, triageEffort: null };
+  assert.deepEqual(settings, { spendTier: "standard", parallel: 1, triage: "auto", triageReady: true, triageEffort: null, effort: null, codex: noCodex });
+  assert.deepEqual(pipelineSettings(""), { spendTier: "standard", parallel: null, triage: "auto", triageReady: false, triageEffort: null, effort: null, codex: noCodex });
+});
+
+const CODEX = "SPEND_TIER=premium\nTRIAGE_READY=1\nEFFORT=medium\nCODEX_MODEL=gpt-6.1-sol\nCODEX_EFFORT=high\nCODEX_TRIAGE_MODEL=gpt-6-luna\nCODEX_TRIAGE_EFFORT=high";
+
+test("codex reads its own model and effort, never the claude spend tier", () => {
+  const s = pipelineSettings(CODEX);
+  assert.equal(modelForRun("codex", s), "gpt-6.1-sol");
+  assert.equal(effortForRun("codex", s), "high");
+  assert.equal(modelForRun("claude", s), TIER_MODELS.premium);
+  assert.equal(effortForRun("claude", s), "medium");
+  assert.deepEqual(triageModelFor("codex", s), { model: "gpt-6-luna", effort: "high" });
+  assert.equal(modelForRun("opencode", s), null);
+  // Unset: codex keeps its config.toml default, and has no triage model.
+  assert.equal(modelForRun("codex", settings), null);
+  assert.equal(triageModelFor("codex", settings), null);
+  // A value shaped like a flag never reaches argv.
+  assert.equal(pipelineSettings("CODEX_MODEL=-c sandbox_mode=x\nCODEX_EFFORT=extreme").codex.model, null);
+  assert.equal(pipelineSettings("CODEX_EFFORT=extreme").codex.effort, null);
+});
+
+test("codex triage runs on its triage model, unless that is the evaluation model", () => {
+  const s = pipelineSettings(CODEX);
+  assert.equal(triageEnabled("codex", s), true);
+  assert.equal(triageEnabled("codex", pipelineSettings(`${CODEX}\nTRIAGE=off`)), false);
+  assert.equal(triageEnabled("codex", pipelineSettings(CODEX.replace("TRIAGE_READY=1", "TRIAGE_READY=0"))), false);
+  const same = pipelineSettings(CODEX.replace("CODEX_TRIAGE_MODEL=gpt-6-luna", "CODEX_TRIAGE_MODEL=gpt-6.1-sol"));
+  assert.equal(triageEnabled("codex", same), false);
+  assert.equal(triageEnabled("codex", { ...same, triage: "on" }), true);
+});
+
+test("the gate hands codex's triage model and effort to the triage call", async () => {
+  const calls = [];
+  const result = await runPipelineGate(deps({
+    cliId: "codex",
+    settings: pipelineSettings(CODEX),
+    runTriage: async (_p, model, effort) => { calls.push({ model, effort }); return "TRIAGE: PASS | Co | Role | 4/5 | ok"; },
+  }));
+  assert.deepEqual(calls, [{ model: "gpt-6-luna", effort: "high" }]);
+  assert.ok(result.notes.includes("Triage model: gpt-6-luna, effort: high"));
+});
+
+test("codex argv: model and effort flags pass the fencing check", () => {
+  const stream = codexStreamArgs("p", { model: "gpt-6.1-sol", effort: "high" });
+  assert.deepEqual(stream, ["exec", "--json", "--color", "never", "-m", "gpt-6.1-sol", "-c", "model_reasoning_effort=high", "p"]);
+  assert.deepEqual(codexStreamArgs("p"), ["exec", "--json", "--color", "never", "p"]);
+  const fenced = fenceArgs({ cliId: "codex", capabilities: CAPS.networkReadOnly, args: stream }).args;
+  assert.ok(fenced.includes("model_reasoning_effort=high"));
+  const triage = codexTriageArgs({ model: "gpt-6-luna", effort: "high", outputFile: "/t/a.txt" });
+  assert.equal(triage.at(-1), "-", "the prompt comes on stdin");
+  assert.equal(triage[triage.indexOf("--output-last-message") + 1], "/t/a.txt");
+  assert.ok(triage.includes("--ignore-user-config"));
+  const fencedTriage = fenceArgs({ cliId: "codex", capabilities: CAPS.localReadOnly, args: triage }).args;
+  assert.ok(fencedTriage.includes("sandbox_mode=read-only"));
 });
 
 test("pipeline effort settings reach the claude argv, and only valid levels do", () => {

@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { localISODate } from "@/lib/followups";
-import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, noOutputError, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, codexStreamArgs, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, noOutputError, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
@@ -265,7 +265,7 @@ export async function POST(req: Request) {
         if (writeToken !== null) releaseTrackerWrite(writeToken);
         const lines = [
           ...gate.notes.map((label) => ({ type: "status", label })),
-          { type: "text", text: `Skipped before the full evaluation (${gate.stage === "triage" ? "triage on the economy model" : "pre-screen rules, no tokens used"}): ${gate.reason}\n` },
+          { type: "text", text: `Skipped before the full evaluation (${gate.stage === "triage" ? "triage on the cheaper model" : "pre-screen rules, no tokens used"}): ${gate.reason}\n` },
           { type: "gated", reason: "dealbreaker", message: gate.reason, confirmationRequired: false },
         ];
         return new Response(lines.map((l) => JSON.stringify(l)).join("\n") + "\n", {
@@ -276,7 +276,7 @@ export async function POST(req: Request) {
     }
     const model = modelForRun(cliId, settings);
     const effort = effortForRun(cliId, settings);
-    if (model) gateNotes.push(`Model: ${model} (spend_tier: ${settings?.spendTier})${effort ? `, effort: ${effort}` : ""}`);
+    if (model) gateNotes.push(`Model: ${model} (${cliId === "claude" ? `spend_tier: ${settings?.spendTier}` : "pipeline.codex"})${effort ? `, effort: ${effort}` : ""}`);
     if (evaluationInstructions) {
       instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
     }
@@ -332,7 +332,11 @@ export async function POST(req: Request) {
     // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
     // envelope-parsing routes rely on.
     const buildArgs = (p: string) =>
-      isClaude ? claudeCliArgs({ kind, prompt: p, model, effort, systemPromptFile: contextPack?.file }) : (spec.streamArgs ?? spec.args)(p);
+      isClaude
+        ? claudeCliArgs({ kind, prompt: p, model, effort, systemPromptFile: contextPack?.file })
+        : cliId === "codex"
+          ? codexStreamArgs(p, { model, effort })
+          : (spec.streamArgs ?? spec.args)(p);
     // The prompt inlines the whole _profile.md (#4003), so it can outgrow the OS
     // command-line limit (ENAMETOOLONG on Windows). Every kind that reaches here
     // can Read (see TOOL_SCOPES), so an oversized prompt goes to a file under the

@@ -66,6 +66,10 @@ const JD_TIMEOUT_MS = 15_000;
 const TRIAGE_JD_CAP = 20_000;
 const DEFAULT_TRIAGE_THRESHOLD = 3.5;
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** Codex's model_reasoning_effort values; a model lists the subset it supports. */
+export const CODEX_EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+/** A model slug as it appears on a command line: no spaces, no shell or config syntax. */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 
 const USAGE = `Usage:
   node prescreen.mjs --url <url> | --input <json> [--jd-file <path>] [--fetch] [--browser]
@@ -133,6 +137,11 @@ const finiteNumber = v => (typeof v === 'number' && Number.isFinite(v) ? v : nul
  *     parallel: 1             # batch-runner.sh workers when --parallel is not given
  *     triage_effort: medium   # reasoning effort of the triage call (low|medium|high|xhigh|max)
  *     effort: medium          # reasoning effort of runs on the spend-tier model
+ *     codex:                  # the codex CLI (spend_tier names Claude models)
+ *       model: gpt-6.1-sol    # full evaluation and other runs (-m)
+ *       effort: high          # their model_reasoning_effort
+ *       triage_model: gpt-6-luna
+ *       triage_effort: high
  *     prescreen:
  *       max_years: 5          # skip a JD whose stated minimum is above this
  *
@@ -156,10 +165,21 @@ export function resolvePrescreenConfig(profile) {
     const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
     return EFFORT_LEVELS.includes(v) ? v : '';
   };
+  const codex = pipeline.codex && typeof pipeline.codex === 'object' ? pipeline.codex : {};
+  // Absent or malformed is '' = the codex CLI's own config.toml default.
+  const modelOf = (value) => (typeof value === 'string' && MODEL_ID.test(value.trim()) ? value.trim() : '');
+  const codexEffortOf = (value) => {
+    const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return CODEX_EFFORT_LEVELS.includes(v) ? v : '';
+  };
   return {
     spendTier: ['economy', 'standard', 'premium'].includes(tier) ? tier : 'standard',
     triageEffort: effortOf(pipeline.triage_effort),
     effort: effortOf(pipeline.effort),
+    codexModel: modelOf(codex.model),
+    codexEffort: codexEffortOf(codex.effort),
+    codexTriageModel: modelOf(codex.triage_model),
+    codexTriageEffort: codexEffortOf(codex.triage_effort),
     maxYears: maxYears !== null && maxYears >= 0 ? maxYears : null,
     triageThreshold: threshold !== null && threshold > 0 && threshold <= 5 ? threshold : DEFAULT_TRIAGE_THRESHOLD,
     triage,
@@ -556,6 +576,10 @@ async function main() {
       `SPEND_TIER=${config.spendTier}`,
       `TRIAGE_EFFORT=${config.triageEffort}`,
       `EFFORT=${config.effort}`,
+      `CODEX_MODEL=${config.codexModel}`,
+      `CODEX_EFFORT=${config.codexEffort}`,
+      `CODEX_TRIAGE_MODEL=${config.codexTriageModel}`,
+      `CODEX_TRIAGE_EFFORT=${config.codexTriageEffort}`,
     ].join('\n') + '\n');
     return;
   }

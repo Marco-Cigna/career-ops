@@ -158,11 +158,56 @@ const GENERIC_FATAL_STDERR_RE =
  * `CliSpec.args` instead — every non-dashboard surface reads codex's stdout
  * directly (`<<offer:>>`/`<<cv:>>` envelopes, the apply planners' JSON array).
  *
+ * `model`/`effort` are config/profile.yml's pipeline.codex block (pipeline-gate.mjs
+ * modelForRun/effortForRun); null leaves codex's own config.toml default.
+ *
  * @param {string} prompt
+ * @param {{model?: string | null, effort?: string | null}} [opts]
  * @returns {string[]}
  */
-export function codexStreamArgs(prompt) {
-  return ["exec", "--json", "--color", "never", prompt];
+export function codexStreamArgs(prompt, opts = {}) {
+  return ["exec", "--json", "--color", "never", ...codexModelFlags(opts), prompt];
+}
+
+/**
+ * `-m` and the reasoning effort. `-c model_reasoning_effort=` is not a policy
+ * key, so cli-fencing.mjs lets it through beside the sandbox it adds.
+ *
+ * @param {{model?: string | null, effort?: string | null}} opts
+ * @returns {string[]}
+ */
+export function codexModelFlags({ model, effort } = {}) {
+  return [
+    ...(model ? ["-m", model] : []),
+    ...(effort ? ["-c", `model_reasoning_effort=${effort}`] : []),
+  ];
+}
+
+/**
+ * The codex triage call: one answer, no project context. Same isolation flags as
+ * AI search (explore/ai): no user config (so no MCP servers or profile
+ * instructions), no session saved, no git check in the empty triage folder. The
+ * prompt arrives on stdin (`-`), since triage has no Read tool to spill a long
+ * one to, and only the final message is written to `outputFile`, so the console
+ * transcript, which echoes the prompt and its TRIAGE line format, is never parsed.
+ *
+ * @param {{model: string, effort?: string | null, outputFile: string}} args
+ * @returns {string[]}
+ */
+export function codexTriageArgs({ model, effort, outputFile }) {
+  return [
+    "exec",
+    "--strict-config",
+    "--ignore-user-config",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "--color",
+    "never",
+    ...codexModelFlags({ model, effort }),
+    "--output-last-message",
+    outputFile,
+    "-",
+  ];
 }
 
 /**

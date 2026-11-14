@@ -37,13 +37,20 @@ export function parseConfigLines(stdout) {
 
 /**
  * @typedef {"low"|"medium"|"high"|"xhigh"|"max"} Effort
- * @typedef {{spendTier: "economy"|"standard"|"premium", parallel: number|null, triage: "auto"|"on"|"off", triageReady: boolean, triageEffort: Effort|null, effort: Effort|null}} PipelineSettings
+ * @typedef {{model: string|null, effort: string|null, triageModel: string|null, triageEffort: string|null}} CodexSettings
+ * @typedef {{spendTier: "economy"|"standard"|"premium", parallel: number|null, triage: "auto"|"on"|"off", triageReady: boolean, triageEffort: Effort|null, effort: Effort|null, codex: CodexSettings}} PipelineSettings
  */
 
 /** Claude Code's --effort levels (prescreen.mjs EFFORT_LEVELS). */
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 /** @returns {Effort|null} */
 const effortFrom = (value) => (EFFORTS.includes(value) ? /** @type {Effort} */ (value) : null);
+/** Codex's model_reasoning_effort values (prescreen.mjs CODEX_EFFORT_LEVELS). */
+const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+const codexEffortFrom = (value) => (CODEX_EFFORTS.includes(value) ? value : null);
+/** Same slug rule as prescreen.mjs: a value that could be read as a flag or config never reaches argv. */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
+const modelFrom = (value) => (typeof value === "string" && MODEL_ID.test(value) ? value : null);
 
 /** @returns {PipelineSettings} */
 export function pipelineSettings(stdout) {
@@ -57,24 +64,73 @@ export function pipelineSettings(stdout) {
     triageReady: raw.TRIAGE_READY === "1",
     triageEffort: effortFrom(raw.TRIAGE_EFFORT),
     effort: effortFrom(raw.EFFORT),
+    codex: {
+      model: modelFrom(raw.CODEX_MODEL),
+      effort: codexEffortFrom(raw.CODEX_EFFORT),
+      triageModel: modelFrom(raw.CODEX_TRIAGE_MODEL),
+      triageEffort: codexEffortFrom(raw.CODEX_TRIAGE_EFFORT),
+    },
   };
 }
 
-/** spend_tier names Claude models, so it only applies to the claude CLI. */
+/**
+ * The model a run uses. spend_tier names Claude models, so it applies to the
+ * claude CLI; codex reads pipeline.codex.model. Null = the CLI's own default.
+ */
 export function modelForRun(cliId, settings) {
-  return cliId === "claude" && settings ? TIER_MODELS[settings.spendTier] : null;
+  if (!settings) return null;
+  if (cliId === "claude") return TIER_MODELS[settings.spendTier];
+  if (cliId === "codex") return settings.codex?.model ?? null;
+  return null;
 }
 
-/** pipeline.effort, for the same runs modelForRun picks a model for. Null = the CLI's default. */
+/** The reasoning effort for the same runs modelForRun picks a model for. Null = the CLI's default. */
 export function effortForRun(cliId, settings) {
-  return cliId === "claude" && settings ? settings.effort : null;
+  if (!settings) return null;
+  if (cliId === "claude") return settings.effort;
+  if (cliId === "codex") return settings.codex?.effort ?? null;
+  return null;
 }
 
-/** Same decision as resolve_triage in batch-runner.sh. */
+/** The triage pass's model and effort on this CLI, or null when it has none. */
+export function triageModelFor(cliId, settings) {
+  if (!settings) return null;
+  if (cliId === "claude") return { model: TIER_MODELS.economy, effort: settings.triageEffort ?? null };
+  if (cliId === "codex" && settings.codex?.triageModel) return { model: settings.codex.triageModel, effort: settings.codex.triageEffort ?? null };
+  return null;
+}
+
+/** Same decision as resolve_triage in batch-runner.sh, extended to codex. */
 export function triageEnabled(cliId, settings) {
-  if (cliId !== "claude" || !settings || settings.triage === "off" || !settings.triageReady) return false;
-  // At the economy tier the full evaluation already runs on that model.
-  return settings.triage === "on" || settings.spendTier !== "economy";
+  if (!settings || settings.triage === "off" || !settings.triageReady || !triageModelFor(cliId, settings)) return false;
+  if (settings.triage === "on") return true;
+  // The full evaluation already runs on the triage model: a first pass saves nothing.
+  if (cliId === "claude") return settings.spendTier !== "economy";
+  return settings.codex.triageModel !== settings.codex.model;
+}
+
+/**
+ * What the inbox Filter can do on this CLI. Pressing Filter asks for triage, so
+ * it runs even where `auto` would leave it off (the economy tier, or a codex
+ * triage model equal to the evaluation model); `off` and an unfilled brief
+ * still stop it. Without triage the Filter runs the free rules alone.
+ *
+ * @param {string} cliId
+ * @param {PipelineSettings|null} settings
+ * @returns {{triage: boolean, model: string|null, effort: string|null, reason: string|null, settings: PipelineSettings|null}}
+ */
+export function filterPlan(cliId, settings) {
+  const none = (reason) => ({ triage: false, model: null, effort: null, reason, settings });
+  if (!settings) return none("config/profile.yml could not be read, so only the free rules run.");
+  if (settings.triage === "off") return none("Triage is off (pipeline.triage: off in config/profile.yml), so only the free rules run.");
+  if (!settings.triageReady) return none("modes/_brief.md is not filled in, so triage would score against placeholders. Only the free rules run.");
+  const model = triageModelFor(cliId, settings);
+  if (!model) {
+    return none(cliId === "codex"
+      ? "No codex triage model is set (pipeline.codex.triage_model), so only the free rules run."
+      : `Triage is not available on ${cliId}, so only the free rules run.`);
+  }
+  return { triage: true, model: model.model, effort: model.effort, reason: null, settings: { ...settings, triage: "on" } };
 }
 
 /**
@@ -111,7 +167,11 @@ export function parseTriage(output) {
 const clip = (text) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
 
 /**
- * @typedef {{skip: false, notes: string[]} | {skip: true, stage: "prescreen"|"triage", reason: string, notes: string[]}} GateResult
+ * `triage` is the verdict the triage model gave, when it ran; the inbox Filter
+ * keeps it (inbox-triage-store.mjs) so a posting is not triaged twice.
+ *
+ * @typedef {{verdict: string, score: number|null, reason: string, model: string}} TriageVerdict
+ * @typedef {{skip: false, notes: string[], triage?: TriageVerdict|null} | {skip: true, stage: "prescreen"|"triage", reason: string, notes: string[], triage?: TriageVerdict|null}} GateResult
  *
  * @param {object} deps
  * @param {string} deps.url
@@ -121,10 +181,11 @@ const clip = (text) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 6
  * @param {string} deps.discardLog absolute path of data/discard.log
  * @param {(script: string, args: string[]) => Promise<{code: number, stdout: string, timedOut?: boolean, spawnFailed?: boolean}>} deps.runCore
  * @param {(name: string, text: string) => string} deps.writeScratch writes a scratch file, returns its path
- * @param {(prompt: string, model: string, effort: Effort|null, systemFile?: string|null) => Promise<string>} deps.runTriage economy-model call; resolves to its stdout
+ * @param {(prompt: string, model: string, effort: string|null, systemFile?: string|null) => Promise<string>} deps.runTriage cheap-model call on deps.cliId; resolves to its answer
+ * @param {{score: number|null, model: string|null}|null} [deps.priorPass] a recent PASS for this posting: triage is not run again
  * @returns {Promise<GateResult>}
  */
-export async function runPipelineGate({ url, jdText, cliId, settings, discardLog, runCore, writeScratch, runTriage }) {
+export async function runPipelineGate({ url, jdText, cliId, settings, discardLog, runCore, writeScratch, runTriage, priorPass = null }) {
   /** @type {string[]} */
   const notes = [];
   let jdFile = null;
@@ -143,8 +204,13 @@ export async function runPipelineGate({ url, jdText, cliId, settings, discardLog
     if (pre.code !== 0) notes.push("Pre-screen could not run; continuing to the evaluation.");
     else notes.push("Pre-screen passed (blacklist, vetoed titles, years of experience).");
 
-    // Stage 2: triage on the economy model. Needs the JD in hand: it has no tools.
+    // Stage 2: triage on the cheap model. Needs the JD in hand: it has no tools.
     if (!triageEnabled(cliId, settings)) return { skip: false, notes };
+    if (priorPass) {
+      notes.push(`Triage passed earlier${priorPass.score === null ? "" : ` (${priorPass.score}/5)`}; not run again.`);
+      return { skip: false, notes };
+    }
+    const triageModel = /** @type {{model: string, effort: string|null}} */ (triageModelFor(cliId, settings));
     if (!jdFile) {
       notes.push("Triage skipped: the posting text was not available before the run.");
       return { skip: false, notes };
@@ -157,17 +223,19 @@ export async function runPipelineGate({ url, jdText, cliId, settings, discardLog
       notes.push("Triage prompt could not be built; continuing to the evaluation.");
       return { skip: false, notes };
     }
-    const triage = parseTriage(await runTriage(prompt.user, TIER_MODELS.economy, settings?.triageEffort ?? null, prompt.systemFile));
+    const triage = parseTriage(await runTriage(prompt.user, triageModel.model, triageModel.effort, prompt.systemFile));
     if (!triage) {
       notes.push("Triage gave no verdict; continuing to the evaluation.");
       return { skip: false, notes };
     }
     const score = triage.score === null ? "" : ` ${triage.score}/5`;
+    notes.push(`Triage model: ${triageModel.model}${triageModel.effort ? `, effort: ${triageModel.effort}` : ""}`);
+    const verdict = { verdict: triage.verdict, score: triage.score, reason: clip(triage.reason), model: triageModel.model };
     if (triage.verdict === "FAIL" || triage.verdict === "MARGINAL") {
-      return { skip: true, stage: "triage", reason: clip(`triage ${triage.verdict}${score}: ${triage.reason}`), notes };
+      return { skip: true, stage: "triage", reason: clip(`triage ${triage.verdict}${score}: ${triage.reason}`), notes, triage: verdict };
     }
     notes.push(`Triage ${triage.verdict}${score}.`);
-    return { skip: false, notes };
+    return { skip: false, notes, triage: verdict };
   } catch {
     notes.push("The cost gate failed; continuing to the evaluation.");
     return { skip: false, notes };

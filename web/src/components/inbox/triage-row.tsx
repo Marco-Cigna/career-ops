@@ -10,6 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 import { inboxScoreTarget } from "@/lib/inbox-score-target.mjs";
+import { addedLabel, addedViaLabel } from "@/lib/inbox-added.mjs";
+
+/** Width of the row's action area, shared with the list header so its "Added" label lines up. */
+export const ACTIONS_WIDTH = "w-[92px] sm:w-[124px]";
+/** Width of the Added column, shared with the list header. */
+export const ADDED_WIDTH = "w-16 sm:w-28";
 
 export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null; needsReview?: boolean };
 
@@ -31,6 +37,7 @@ export function TriageRow({
   job,
   source,
   age,
+  now,
   reason,
   scored,
   selected,
@@ -43,7 +50,9 @@ export function TriageRow({
   cursor: boolean;
   job: InboxJob;
   source: AtsSource | null;
+  /** Days since the employer posted it; null when the posting carries no date. */
   age: number | null;
+  now: number;
   reason?: string;
   scored?: RowScore;
   selected: boolean;
@@ -53,6 +62,8 @@ export function TriageRow({
   onSkip: () => void;
 }) {
   const ago = agoLabel(age);
+  const added = addedLabel(job.addedAt, now);
+  const via = addedViaLabel(job.addedVia);
   const target = inboxScoreTarget(scored);
   const evaluated = target.evaluated;
   const postingHref = unscoredInboxHref(job.url, evaluated);
@@ -97,13 +108,33 @@ export function TriageRow({
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
           {job.location && <span className="truncate">{job.location}</span>}
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
-          {ago && <span>{ago}</span>}
+          {ago && <span title={job.postedAt ? `Posted ${job.postedAt}` : undefined}>posted {ago}</span>}
           {reason ? <span className="text-muted">{reason}</span> : null}
+          {!evaluated && job.triage?.verdict === "PASS" && (
+            <span className="rounded bg-emerald-500/15 px-1 py-px font-medium text-emerald-700 dark:text-emerald-400" title={job.triage.reason || "Passed the inbox filter"}>
+              passed filter{job.triage.score == null ? "" : ` ${job.triage.score}/5`}
+            </span>
+          )}
+          {!evaluated && job.triage?.verdict === "UNCHECKED" && (
+            <span className="text-amber-700 dark:text-amber-400" title={job.triage.reason}>not filtered</span>
+          )}
           {!evaluated && <span className="italic text-muted">not scored</span>}
         </p>
       </div>
 
-      {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
+      {/* Added column: the day a scan put it in the inbox, and which scan. Same
+          width on every row so the dates line up under the list header. */}
+      <div
+        className={cn("shrink-0 text-right", ADDED_WIDTH)}
+        title={job.addedAt ? `Added to your inbox ${job.addedAt}${via ? ` by a ${via} scan` : ""}` : "Not added by a scan"}
+      >
+        <p className="text-xs tabular-nums text-muted">{added || "—"}</p>
+        {via ? <p className="truncate text-[10px] text-faint max-sm:hidden">{via}</p> : null}
+      </div>
+
+      {/* EVALUADA state (right-aligned, visually distinct from raw rows). A fixed
+          width, so the Added column sits at the same x on every row. */}
+      <div className={cn("flex shrink-0 justify-end", ACTIONS_WIDTH)}>
       {scored?.needsReview ? (
         <div className="flex shrink-0 items-center gap-1">
           <Link href={`/jobs/${scored.jobId}`} className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-400">
@@ -157,6 +188,7 @@ export function TriageRow({
           </button>
         </div>
       )}
+      </div>
     </li>
   );
 }
