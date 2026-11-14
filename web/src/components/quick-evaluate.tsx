@@ -55,7 +55,7 @@ export function QuickEvaluate() {
         <span className="text-xs text-faint">Evaluation runs on your own AI — your key, your machine.</span>
       </div>
       <details className="mt-3 max-w-xl">
-        <summary className="cursor-pointer text-xs text-brand-text">Evaluation options · {sections.length === FULL_EVALUATION.length ? "full evaluation" : `${sections.length} optional sections`}</summary>
+        <summary className="cursor-pointer text-xs text-brand-text">Evaluation · {sections.length === FULL_EVALUATION.length ? "all sections" : `${sections.length} of ${FULL_EVALUATION.length} sections`}</summary>
         <div className="mt-3"><EvaluationOptions sections={sections} onChange={setSections} /></div>
       </details>
       {hint && <p className="mt-1 text-xs text-faint">{hint}</p>}

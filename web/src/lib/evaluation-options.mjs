@@ -9,7 +9,6 @@ export const EVALUATION_OPTIONS = Object.freeze([
   { id: "keywords", label: "Keywords and ATS coverage", description: "Posting keywords and coverage in your existing experience.", words: 180 },
 ]);
 export const FULL_EVALUATION = Object.freeze(EVALUATION_OPTIONS.map((option) => option.id));
-export const ESSENTIAL_EVALUATION = Object.freeze(["summary"]);
 export const EVALUATION_STORAGE_KEY = "career-ops:evaluation-sections";
 
 /** Undefined preserves the existing full-evaluation API contract. Invalid input never spends tokens. */

@@ -47,12 +47,12 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
   import a replacement, review the converted Markdown, then select **Update cv.md**.
   Conversion uses your configured AI CLI; saving backs up the previous CV.
 
-### Full or focused evaluation
+### Choosing what an evaluation includes
 
-Open **Evaluation options** below the pasted-URL form, or select sections when
-confirming **Score shortlist**. Full evaluation is the default. **Essentials**
-keeps a short job summary; you can also choose optional sections individually.
-Your selection is remembered in this browser.
+Open **Evaluation** below the pasted-URL form, or when confirming **Score
+shortlist**, and tick the optional sections you want (**Select all** and
+**Clear** set them in one click). All sections are on by default. Your
+selection is remembered in this browser.
 
 Every selection keeps the fit score, requirements and gaps, evidence confidence,
 basic posting checks, and the archived job description. Focused reports identify

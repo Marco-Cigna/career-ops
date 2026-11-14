@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, SlidersHorizontal } from "lucide-react";
-import { EVALUATION_OPTIONS, ESSENTIAL_EVALUATION, FULL_EVALUATION, EVALUATION_STORAGE_KEY, parseEvaluationOptions } from "@/lib/evaluation-options.mjs";
+import { EVALUATION_OPTIONS, FULL_EVALUATION, EVALUATION_STORAGE_KEY, parseEvaluationOptions } from "@/lib/evaluation-options.mjs";
 
 export function useEvaluationOptions() {
   const [sections, setSections] = useState<string[]>([...FULL_EVALUATION]);
@@ -32,15 +32,16 @@ export function useEvaluationOptions() {
 }
 
 export function EvaluationOptions({ sections, onChange }: { sections: string[]; onChange: (next: string[]) => void }) {
-  const full = sections.length === FULL_EVALUATION.length;
+  const all = sections.length === FULL_EVALUATION.length;
   return (
     <fieldset className="min-w-0 rounded-xl border border-border bg-surface p-4">
-      <legend className="flex items-center gap-2 px-1 text-sm font-medium"><SlidersHorizontal className="size-4 text-brand-text" /> Evaluation sections</legend>
-      <div className="mb-3 flex flex-wrap gap-2">
-        <button type="button" aria-pressed={sections.length === 1 && sections[0] === "summary"} onClick={() => onChange([...ESSENTIAL_EVALUATION])} className="rounded-full border border-border px-3 py-1.5 text-xs aria-pressed:border-brand aria-pressed:bg-brand-soft aria-pressed:text-brand-text">Essentials</button>
-        <button type="button" aria-pressed={full} onClick={() => onChange([...FULL_EVALUATION])} className="rounded-full border border-border px-3 py-1.5 text-xs aria-pressed:border-brand aria-pressed:bg-brand-soft aria-pressed:text-brand-text">Full evaluation</button>
-      </div>
+      <legend className="flex items-center gap-2 px-1 text-sm font-medium"><SlidersHorizontal className="size-4 text-brand-text" /> Evaluation</legend>
       <p className="mb-3 flex items-start gap-2 text-xs text-muted"><Check className="mt-0.5 size-3.5 shrink-0 text-brand-text" /> Always included: fit score, key requirements and gaps, evidence confidence, and basic posting checks.</p>
+      <div className="mb-1 flex items-center gap-3 text-xs">
+        <span className="text-muted">Add to the report:</span>
+        <button type="button" disabled={all} onClick={() => onChange([...FULL_EVALUATION])} className="text-brand-text hover:underline disabled:cursor-default disabled:text-faint disabled:no-underline max-sm:min-h-[44px]">Select all</button>
+        <button type="button" disabled={sections.length === 0} onClick={() => onChange([])} className="text-brand-text hover:underline disabled:cursor-default disabled:text-faint disabled:no-underline max-sm:min-h-[44px]">Clear</button>
+      </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {EVALUATION_OPTIONS.map((option) => (
           <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-lg p-2 hover:bg-surface-hover">

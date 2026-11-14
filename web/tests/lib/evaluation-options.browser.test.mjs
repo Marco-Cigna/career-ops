@@ -35,19 +35,19 @@ test("evaluation choices survive navigation and reach pasted-URL and shortlist w
     await request;
   }
   await page.goto(url);
-  await page.getByText("Evaluation options · full evaluation", { exact: true }).click();
-  const options = page.getByRole("group", { name: "Evaluation sections" });
+  await page.getByText("Evaluation · all sections", { exact: true }).click();
+  const options = page.getByRole("group", { name: "Evaluation" });
   assert.equal(await options.getByRole("checkbox").count(), FULL_EVALUATION.length);
   assert.equal(await options.getByRole("checkbox", { checked: true }).count(), FULL_EVALUATION.length);
   await scoreQuick("https://example.com/fixture-full");
   assert.deepEqual(requests.at(-1).evaluationSections, [...FULL_EVALUATION]);
-  await options.getByRole("button", { name: "Essentials", exact: true }).click();
-  await options.getByRole("checkbox", { name: /Job summary/ }).uncheck();
+  await options.getByRole("button", { name: "Clear", exact: true }).click();
+  assert.equal(await options.getByRole("checkbox", { checked: true }).count(), 0);
   await scoreQuick("https://example.com/fixture-fit-only");
   assert.deepEqual(requests.at(-1).evaluationSections, []);
   await options.getByRole("checkbox", { name: /Interview preparation/ }).check();
   await page.reload();
-  await page.getByText("Evaluation options · 1 optional sections", { exact: true }).click();
+  await page.getByText(`Evaluation · 1 of ${FULL_EVALUATION.length} sections`, { exact: true }).click();
   assert.equal(await options.getByRole("checkbox", { name: /Interview preparation/ }).isChecked(), true);
   assert.equal(await options.getByRole("checkbox", { checked: true }).count(), 1);
 
@@ -55,7 +55,8 @@ test("evaluation choices survive navigation and reach pasted-URL and shortlist w
   await page.locator("li:visible").filter({ hasText: "Fixture Alpha" }).getByRole("button", { name: /Save/ }).click();
   await page.getByRole("button", { name: /^Score 1 ·/ }).click();
   assert.equal(await options.getByRole("checkbox", { name: /Interview preparation/ }).isChecked(), true);
-  await options.getByRole("button", { name: "Essentials", exact: true }).click();
+  await options.getByRole("button", { name: "Clear", exact: true }).click();
+  await options.getByRole("checkbox", { name: /Job summary/ }).check();
   const request = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/run");
   await page.getByRole("button", { name: "Score 1 now", exact: true }).click();
   await request;
