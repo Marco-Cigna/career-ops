@@ -96,11 +96,14 @@ export function enrichAnalyticsApplication(app: Application, reportContent = "")
   const notes = app.notes ?? "";
   const notePay = highestMoney(notes);
   const combinedText = `${app.role} ${notes}`;
-  const noteLocation = fallbackLocation(notes);
+  // The tracker's City column first: it is filled from the report's stated
+  // posting location (or typed in), so it beats a city spotted in free-text notes.
+  const columnCity = String(app.location ?? "").trim();
+  const location = columnCity && columnCity !== "—" && columnCity !== "-" ? columnCity : fallbackLocation(notes);
   return {
     ...app,
     archetype: reportArchetype(reportContent, ""),
-    location: noteLocation,
+    location,
     workMode: normalizeWorkMode("", combinedText),
     payMax: notePay.value,
     paySource: notePay.source,

@@ -987,7 +987,7 @@ var trackerHeaderAliases = map[string]string{
 	"entreprise": "company", "azienda": "company", "şirket": "company",
 	"via": "via", "role": "role", "puesto": "role",
 	"rolle": "role", "rola": "role", "vaga": "role", "ruolo": "role", "rol": "role",
-	"location": "location", "ort": "location",
+	"location": "location", "ort": "location", "city": "location",
 	"score": "score", "punteggio": "score", "puan": "score",
 	"status": "status", "statut": "status", "stato": "status", "durum": "status",
 	"pdf": "pdf", "materials": "pdf", "report": "report", "rapor": "report",

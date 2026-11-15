@@ -136,3 +136,10 @@ test("trailing USD qualifies compensation without accepting other currencies", (
     assert.equal(enrichAnalyticsApplication(application(notes)).payMax, expected, notes);
   }
 });
+
+test("the tracker's City column wins over a city spotted in notes", () => {
+  const withColumn = { ...application("relocating from London"), location: "Sydney" };
+  assert.equal(enrichAnalyticsApplication(withColumn, "").location, "Sydney");
+  const dash = { ...application("based in London"), location: "—" };
+  assert.equal(enrichAnalyticsApplication(dash, "").location, "London");
+});

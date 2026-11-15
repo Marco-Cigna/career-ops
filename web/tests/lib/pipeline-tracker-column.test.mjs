@@ -15,7 +15,7 @@ test("tracker identifiers sort numerically rather than lexicographically", () =>
 });
 
 test("Tracker is the first sortable Pipeline column", () => {
-  assert.match(source, /const SORT_KEYS = \["tracker", "company", "role", "score", "status", "date"\]/);
+  assert.match(source, /const SORT_KEYS = \["tracker", "company", "role", "city", "score", "status", "date"\]/);
 });
 
 test("sortable Pipeline headers use native keyboard-operable buttons", () => {
@@ -28,7 +28,8 @@ test("the visible tracker identifier uses the canonical tracker route", () => {
   assert.match(source, /<Link href=\{detailHref\}[^>]*>\s*#\{r\.n\}\s*<\/Link>/);
 });
 
-test("the lower-priority Date header and cells hide below the large breakpoint", () => {
-  assert.match(source, /k === "date" && "hidden lg:table-cell"/);
-  assert.match(source, /<td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">\{r\.date\}<\/td>/);
+test("the lower-priority Date and City headers and cells hide below the large breakpoint", () => {
+  assert.match(source, /\(k === "date" \|\| k === "city"\) && "hidden lg:table-cell"/);
+  assert.match(source, /<td className="hidden px-3 py-3 text-muted lg:table-cell">\s*<span[\s\S]*?title=\{cityLabel\(r\.location\)\}/);
+  assert.match(source, /<td className="hidden whitespace-nowrap px-3 py-3 text-faint tabular-nums lg:table-cell">\{r\.date\}<\/td>/);
 });

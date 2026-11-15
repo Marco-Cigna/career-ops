@@ -210,7 +210,7 @@ function Distribution({ rows, emptyLabel = "No distribution data" }: { rows: { l
 }
 
 export function BreakdownList({ rows, icon, emptyLabel }: { rows: { label: string; count: number; pct: number }[]; icon: React.ReactNode; emptyLabel: string }) {
-  if (!rows.length) return <EmptyData label={emptyLabel} detail="Add an explicit work mode or location to the tracker notes to populate this dimension." />;
+  if (!rows.length) return <EmptyData label={emptyLabel} detail="Fill the tracker's City column, or add an explicit work mode to the tracker notes, to populate this dimension." />;
   return <div className="mt-4 space-y-3">{rows.map((row, index) => <div key={row.label} className="flex items-center gap-2 text-sm"><span className="text-brand-text">{icon}</span><span className="min-w-0 flex-1 break-words text-muted">{row.label}</span><span className="font-mono text-xs tabular-nums text-foreground">{row.count}</span><span className="w-12 text-right font-mono text-[11px] tabular-nums text-faint">{Math.round(row.pct)}%</span></div>)}</div>;
 }
 

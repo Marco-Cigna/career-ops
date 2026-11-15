@@ -29,5 +29,5 @@ export function companyPresentation({ company = "", via = "" } = {}) {
 /** @param {{ company?: string, via?: string, role?: string }} application */
 export function companySearchText(application) {
   const { label } = companyPresentation(application);
-  return `${application?.company ?? ""} ${application?.via ?? ""} ${label} ${application?.role ?? ""}`;
+  return `${application?.company ?? ""} ${application?.via ?? ""} ${label} ${application?.role ?? ""} ${application?.location ?? ""}`;
 }

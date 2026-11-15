@@ -27,6 +27,7 @@
   "rol": "role",
   "location": "location",
   "ort": "location",
+  "city": "location",
   "score": "score",
   "punteggio": "score",
   "puan": "score",

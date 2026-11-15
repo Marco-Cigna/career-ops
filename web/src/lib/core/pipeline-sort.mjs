@@ -66,6 +66,18 @@ export function sortRows(rows, sort, scoreOf, companyLabel = (row) => String(row
       // never reach the row-number tie-break below.
       return av === bv ? 0 : (av - bv) * dir;
     }
+    if (sort.key === 'city') {
+      // The City column reads the tracker's location field. A row with no city
+      // sorts after every named one in either direction.
+      const city = (row) => {
+        const v = String(row.location ?? '').trim();
+        return v === '—' || v === '-' ? '' : v;
+      };
+      const av = city(a);
+      const bv = city(b);
+      if (!av || !bv) return av === bv ? 0 : av ? -1 : 1;
+      return av.localeCompare(bv) * dir;
+    }
     const aValue = sort.key === 'company' ? companyLabel(a) : a[sort.key] || '';
     const bValue = sort.key === 'company' ? companyLabel(b) : b[sort.key] || '';
     return String(aValue).localeCompare(String(bValue)) * dir;

@@ -19,11 +19,13 @@
  * Migrations (one-off, idempotent, all support --dry-run):
  *   --migrate        report links → relative to the tracker file (#760)
  *   --migrate-via    insert a Via column after Company (#1596)
+ *   --migrate-location  insert a City column after Role and fill it from reports
  *   --migrate-urls   render the URL column as markdown links (#3516)
  *   --backfill-urls  fill empty URL cells from each row's linked report
  */
 
 import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
+import { cityFromLocation, reportCity } from './lib/location-city.mjs';
 import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -52,12 +54,14 @@ Options:
   --verify         Run pipeline verification after a successful merge
   --migrate        Rewrite legacy report links relative to the tracker
   --migrate-via    Add the Via column to a legacy tracker
+  --migrate-location  Add a City column after Role (if missing) and fill empty
+                   cells from each row's report (posting_location / Location:)
   --migrate-urls   Render the URL column as markdown links
   --backfill-urls  Add the URL column and populate it from report metadata
   --allow-headerless  Accept legacy headerless positional TSV additions
                       (refused by default: score/status order is ambiguous)
   -h, --help       Show this help and exit`;
-const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--migrate-urls', '--backfill-urls', '--allow-headerless', '--help', '-h'];
+const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--migrate-location', '--migrate-urls', '--backfill-urls', '--allow-headerless', '--help', '-h'];
 
 // Executable hooks live beside this script even when user data is redirected
 // through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
@@ -357,6 +361,7 @@ export async function mergeTracker(options = {}) {
   const MIGRATE = Boolean(flags.migrate);
   const MIGRATE_VIA = Boolean(flags.migrateVia);
   const MIGRATE_URLS = Boolean(flags.migrateUrls);
+  const MIGRATE_LOCATION = Boolean(flags.migrateLocation);
   const BACKFILL_URLS = Boolean(flags.backfillUrls);
   const MERGE_HOLD_MS = options.holdMs || 0;
   const MERGE_READY_IPC = Boolean(options.readyIpc);
@@ -534,6 +539,40 @@ export async function mergeTracker(options = {}) {
   // for rows that already match on company and title. A placeholder
   // cell is no URL: returned as one, it hid the report, so a guard saw "unknown"
   // and another requisition with the same title folded into this row.
+  // The City cell a report implies: its posting_location (or **Location:**
+  // line) reduced to the city. "" when the link resolves to no report or the
+  // report states no place. Each report is read once per run.
+  const reportCities = new Map();
+  function resolveReportCity(reportField) {
+    if (!reportCities.has(reportField)) {
+      const reportPath = resolveReportPath(reportField);
+      let city = '';
+      if (reportPath) {
+        try { city = reportCity(readFileSync(reportPath, 'utf-8')); } catch { city = ''; }
+      }
+      reportCities.set(reportField, city);
+    }
+    return reportCities.get(reportField);
+  }
+
+  /** A City cell that holds no value: empty, or the tracker's `—`/`-` marker. */
+  const isUnsetCity = (value) => /^(?:|—|-|n\/a)$/i.test(String(value ?? '').trim());
+
+  /**
+   * The City cell for a merged row: the addition's own value, else what the
+   * row already holds, else the city its report states. A value the user
+   * typed into the row is never replaced by one derived from a report.
+   */
+  function mergedCity(addition, existing = '') {
+    // No City column, nothing to fill: a tracker without one never pays for a
+    // report read here.
+    if (COLMAP.location == null) return addition.location || existing || '—';
+    const own = cityFromLocation(addition.location);
+    if (own) return own;
+    if (!isUnsetCity(existing)) return existing;
+    return resolveReportCity(addition.report) || '—';
+  }
+
   const reportUrls = new Map();
   function postingUrl(app) {
     if (!isUnsetUrlCell(app.url)) return app.url;
@@ -1452,6 +1491,57 @@ export async function mergeTracker(options = {}) {
       return 0;
     }
 
+    // Opt-in migration: a City column after Role, filled from each row's report.
+    // The column holds the posting's city only ("Sydney", not "Sydney, NSW,
+    // Australia"), so analytics groups one city as one value. Idempotent: a
+    // tracker that already has the column keeps it, and only empty cells are
+    // filled, so a value the user typed is never replaced. Rows whose report
+    // states no place stay `—`.
+    // Run with: node merge-tracker.mjs --migrate-location [--dry-run]
+    if (MIGRATE_LOCATION) {
+      const lines = appContent.split('\n');
+      const colmap = detectColumns(lines) || LEGACY_COLMAP;
+      const hasColumn = colmap.location != null;
+      const roleIdx = colmap.role;
+      let filled = 0, unknown = 0, kept = 0, skipped = 0;
+      const migrated = lines.map((line) => {
+        if (!line.startsWith('|')) return line;
+        const parts = line.split('|').map(s => s.trim());
+        const isHeader = isHeaderRow(line);
+        const isSeparator = !isHeader && /^[-: ]*$/.test(parts.join(''));
+        const closed = line.trimEnd().endsWith('|');
+        const end = closed ? parts.length - 1 : parts.length;
+        if (isHeader || isSeparator) {
+          if (hasColumn) return line;
+          const cells = [...parts.slice(1, roleIdx + 1), isHeader ? 'City' : '-----', ...parts.slice(roleIdx + 1, end)];
+          return isSeparator ? `|${cells.map(c => c || '---').join('|')}|` : `| ${cells.join(' | ')} |`;
+        }
+        if (parts.length <= roleIdx || isNaN(parseInt(parts[colmap.num]))) { skipped++; return line; }
+        const report = colmap.report != null ? (parts[colmap.report] ?? '') : '';
+        if (hasColumn) {
+          if (!isUnsetCity(parts[colmap.location])) { kept++; return line; }
+          const city = resolveReportCity(report);
+          if (!city) { unknown++; return line; }
+          filled++;
+          const cells = parts.slice(1, end);
+          cells[colmap.location - 1] = cell(city);
+          return `| ${cells.join(' | ')} |`;
+        }
+        const city = resolveReportCity(report);
+        if (city) filled++; else unknown++;
+        const cells = [...parts.slice(1, roleIdx + 1), city ? cell(city) : '—', ...parts.slice(roleIdx + 1, end)];
+        return `| ${cells.join(' | ')} |`;
+      });
+      const summary = `${filled} filled from reports, ${unknown} with no stated place (left —), ${kept} already set${skipped ? `, ${skipped} unreadable row(s) left as they were` : ''}`;
+      if (DRY_RUN) {
+        console.log(`🔎 Migration (dry-run): ${hasColumn ? 'City column present' : 'City column would be inserted after Role'}; ${summary}.`);
+      } else {
+        writeFileAtomic(APPS_FILE, migrated.join('\n'));
+        console.log(`✅ Migration: ${hasColumn ? 'City column present' : 'inserted City column after Role'}; ${summary}.`);
+      }
+      return 0;
+    }
+
     // Opt-in migration (#3516): render every existing URL cell as a markdown link.
     //
     // Not needed for correctness — readers accept both forms, and any row a merge
@@ -2284,7 +2374,7 @@ export async function mergeTracker(options = {}) {
           // the existing role, since there the pairing is only a guess.
           role: (reportNumMatched || dupReason === 'url') ? addition.role : duplicate.role,
           via: addition.via || duplicate.via || '—',
-          location: addition.location || duplicate.location || '—',
+          location: mergedCity(addition, duplicate.location),
           score: addition.score, status: duplicate.status, pdf,
           report: addition.report,
           notes: updatedNotes,
@@ -2347,7 +2437,7 @@ export async function mergeTracker(options = {}) {
         const newLine = buildRow({
           num: entryNum, date: addition.date, company: addition.company, role: addition.role,
           via: addition.via || '—',
-          location: addition.location || '—',
+          location: mergedCity(addition),
           score: addition.score, status: addition.status, pdf,
           report: addition.report, notes: addition.notes,
           // Write the key on the way in. Backfill is the one-time EXPAND phase for
@@ -2536,6 +2626,7 @@ if (isMainModule(import.meta.url)) {
       migrate: argv.includes('--migrate'),
       migrateVia: argv.includes('--migrate-via'),
       migrateUrls: argv.includes('--migrate-urls'),
+      migrateLocation: argv.includes('--migrate-location'),
       backfillUrls: argv.includes('--backfill-urls'),
       allowHeaderless: argv.includes('--allow-headerless'),
     },

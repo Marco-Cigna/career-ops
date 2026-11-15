@@ -194,3 +194,13 @@ test('scoreNum reports unusable cells as NaN, never as 0', { skip: skipTs }, () 
   assert.equal(scoreNum('7'), 7);
   assert.equal(scoreNum('4.2/5'), 4.2);
 });
+
+test('the City column sorts by the location field, with no-city rows last both ways', () => {
+  const rows = [
+    { n: '1', role: 'A', location: '—', score: '' },
+    { n: '2', role: 'B', location: 'Sydney', score: '' },
+    { n: '3', role: 'C', location: 'Berlin', score: '' },
+  ];
+  assert.deepEqual(sortRows(rows, { key: 'city', dir: 1 }, scoreNum).map((r) => r.n), ['3', '2', '1']);
+  assert.deepEqual(sortRows(rows, { key: 'city', dir: -1 }, scoreNum).map((r) => r.n), ['2', '3', '1']);
+});

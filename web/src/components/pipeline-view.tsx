@@ -17,6 +17,8 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
+import { AddAppliedJob } from "@/components/add-applied-job";
+import { EditRowButton } from "@/components/edit-row-button";
 import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, tabStripScrollLeft, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
 import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
 import { useListSearch } from "@/lib/use-list-search";
@@ -37,7 +39,17 @@ import { pipelineFindRolesHref } from "@/lib/scan-on-load.mjs";
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
 
-const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
+/** The City cell as shown: the tracker's value, or a dash when it has none. */
+function cityLabel(value: string | undefined): string {
+  const v = String(value ?? "").trim();
+  return !v || v === "-" ? "—" : v;
+}
+
+const SORT_KEYS = ["tracker", "company", "role", "city", "score", "status", "date"] as const;
+/** What each sortable header reads (uppercased by CSS). */
+const SORT_LABELS: Record<(typeof SORT_KEYS)[number], string> = {
+  tracker: "#", company: "Company", role: "Role", city: "City", score: "Score", status: "Status", date: "Date",
+};
 const VIEWS_KEY = "career-ops:pipeline-views";
 const REMOVAL_WARNING = "This removal is not saved yet. Reloading brings the view back.";
 type SortKey = (typeof SORT_KEYS)[number];
@@ -399,8 +411,8 @@ export function PipelineView({
   const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
   const mountedRows = filtered.slice(span.start, span.end);
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
-  // The checkbox, the sortable columns and the resume column.
-  const columnCount = SORT_KEYS.length + 2;
+  // The checkbox, the sortable columns, the CV column and the edit column.
+  const columnCount = SORT_KEYS.length + 3;
   // Same test as the selection bar's selectedRows.length > 0.
   const hasSelection = filtered.some((r) => selected.has(applicationKey(r)));
 
@@ -700,6 +712,7 @@ export function PipelineView({
               <Download aria-hidden="true" className="size-4" />
               <span className="max-sm:sr-only">Download CSV</span>
             </button>
+            <AddAppliedJob />
           </div>
         )}
       </div>
@@ -925,7 +938,7 @@ export function PipelineView({
           <table
             aria-label="Tracked applications"
             aria-rowcount={filtered.length + 1}
-            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-10 min-[1440px]:[&_th:nth-child(2)]:w-[4rem] min-[1440px]:[&_th:nth-child(3)]:w-[21%] min-[1440px]:[&_th:nth-child(5)]:w-[9.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[5.25rem] min-[1440px]:[&_th:nth-child(7)]:w-[13rem] min-[1440px]:[&_th:nth-child(8)]:w-[6.5rem] min-[1440px]:[&_th:nth-child(9)]:w-[4rem] min-[1440px]:[&_th:nth-child(10)]:w-11"
           >
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
@@ -942,21 +955,24 @@ export function PipelineView({
                     key={k}
                     aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
                     className={cn(
-                      "whitespace-nowrap px-4 py-2.5 font-medium",
-                      k === "date" && "hidden lg:table-cell",
+                      "whitespace-nowrap py-2.5 font-medium",
+                      k === "company" || k === "role" ? "px-4" : "px-3",
+                      (k === "date" || k === "city") && "hidden lg:table-cell",
                     )}
                   >
                     <button
                       type="button"
-                      className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
+                      aria-label={`Sort by ${SORT_LABELS[k]}`}
+                      className={cn("inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground", sort.key === k && "text-foreground")}
                       onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                     >
-                      {k}
+                      {SORT_LABELS[k]}
                       <ChevronsUpDown aria-hidden="true" className="size-3" />
                     </button>
                   </th>
                 ))}
-                <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
+                <th className="whitespace-nowrap px-3 py-2.5 font-medium">CV</th>
+                <th className="px-2 py-2.5"><span className="sr-only">Edit</span></th>
               </tr>
             </thead>
             {/* Keep editors mounted while query navigation is pending: sorting
@@ -1082,7 +1098,7 @@ const TrackerRow = memo(function TrackerRow({
           }}
         />
       </td>
-      <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
+      <td className="whitespace-nowrap px-3 py-3 font-medium tabular-nums text-muted">
         <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="transition-colors group-hover:text-brand-text">
           #{r.n}
         </Link>
@@ -1113,10 +1129,13 @@ const TrackerRow = memo(function TrackerRow({
           )}
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="hidden px-3 py-3 text-muted lg:table-cell">
+        <span className={cn("block max-w-40 truncate min-[1440px]:max-w-none", cityLabel(r.location) === "—" && "text-faint")} title={cityLabel(r.location)}>{cityLabel(r.location)}</span>
+      </td>
+      <td className="px-3 py-3">
         <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-muted">
+      <td className="whitespace-nowrap px-3 py-3 text-muted">
         <StatusSelect
           n={r.n}
           current={r.status}
@@ -1127,8 +1146,8 @@ const TrackerRow = memo(function TrackerRow({
           onSaved={(status, restoreFocus) => onSaved(r, status, restoreFocus)}
         />
       </td>
-      <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
-      <td className="whitespace-nowrap px-4 py-3">
+      <td className="hidden whitespace-nowrap px-3 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+      <td className="whitespace-nowrap px-3 py-3">
         {hasCv ? (
           <a
             href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
@@ -1142,6 +1161,9 @@ const TrackerRow = memo(function TrackerRow({
         ) : (
           <span className="text-faint">—</span>
         )}
+      </td>
+      <td className="px-2 py-3 text-right">
+        <EditRowButton n={r.n} company={r.company} role={r.role} city={r.location} />
       </td>
     </tr>
   );
