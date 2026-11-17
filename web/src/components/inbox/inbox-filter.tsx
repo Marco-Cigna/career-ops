@@ -1,17 +1,18 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Filter, Loader2, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import { resolveCliId } from "@/lib/saved-cli";
 import { runPool } from "@/lib/run-pool.mjs";
+import { subscribeConfig } from "@/lib/config-events.mjs";
 
 // The inbox Filter button: pre-screen rules (free) then triage on the cheap
 // model, for every row that has not been filtered yet. Failures leave the inbox
 // (api/inbox/filter ticks them off); passes stay, marked, for the user to score.
 
 export type FilterOutcome = { outcome: "passed" | "removed" | "unchecked" | "error"; score?: number | null; reason?: string };
-type Plan = { cliId: string; triage: boolean; model: string | null; effort: string | null; reason: string | null };
+type Plan = { cliId: string; cliName: string; triage: boolean; model: string | null; effort: string | null; reason: string | null };
 type Progress = { done: number; total: number; passed: number; removed: number; unchecked: number; errors: number };
 
 // Triage is a short call on a cheap model; three at a time keeps a large inbox
@@ -29,6 +30,16 @@ export function InboxFilter({ candidates, onResult, onFinished }: {
   const [error, setError] = useState("");
   const abort = useRef<AbortController | null>(null);
 
+  // A confirmation belongs to the selected CLI. Reopen it after a Config
+  // change rather than starting work with an earlier selection's plan.
+  useEffect(() => {
+    if (phase !== "confirm") return;
+    return subscribeConfig(window, () => {
+      setPlan(null);
+      setPhase("idle");
+    });
+  }, [phase]);
+
   const open = async () => {
     setError("");
     const cliId = await resolveCliId();
@@ -37,7 +48,7 @@ export function InboxFilter({ candidates, onResult, onFinished }: {
       return;
     }
     try {
-      const r = await fetch(`/api/inbox/filter?cliId=${encodeURIComponent(cliId)}`);
+      const r = await fetch(`/api/inbox/filter?cliId=${encodeURIComponent(cliId)}`, { cache: "no-store" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Filter is not available.");
       setPlan(d);
@@ -115,7 +126,7 @@ export function InboxFilter({ candidates, onResult, onFinished }: {
           {plan.triage ? (
             <li>
               A quick triage of each job that passes, on <span className="font-mono text-foreground">{plan.model}</span>
-              {plan.effort ? ` (${plan.effort})` : ""}: up to {candidates.length} short calls. Below 3.5/5 is removed.
+              {plan.effort ? ` (${plan.effort})` : ""} via {plan.cliName}: up to {candidates.length} short calls. Below 3.5/5 is removed.
             </li>
           ) : (
             <li>{plan.reason}</li>

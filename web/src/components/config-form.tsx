@@ -103,7 +103,17 @@ export function ConfigForm() {
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="font-display text-2xl tracking-tight text-landing">Config</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="font-display text-2xl tracking-tight text-landing">Config</h1>
+        <button
+          type="button"
+          onClick={save}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
+        >
+          {saved ? <Check className="size-4" /> : null}
+          {saved ? "Saved" : "Save config"}
+        </button>
+      </div>
       <p className="mt-1 text-sm text-muted">
         Run career-ops on your own AI, right on your computer. Your CV and data never leave your machine.
       </p>
@@ -158,7 +168,10 @@ export function ConfigForm() {
                       <button
                         key={c.id}
                         type="button"
-                        onClick={() => setCliId(c.id)}
+                        onClick={() => {
+                          setCliId(c.id);
+                          persistCliId(c.id);
+                        }}
                         aria-pressed={selected}
                         className={cn(rowClassName, "w-full cursor-pointer text-left")}
                       >
@@ -208,6 +221,7 @@ export function ConfigForm() {
                     No supported CLI found on your PATH. Install one (e.g. Claude Code, Gemini CLI, OpenCode) to get started.
                   </p>
                 )}
+                <p className="mt-2 text-xs text-faint">Your AI tool selection is saved immediately.</p>
                 <p className="mt-2 text-[11px] leading-relaxed text-faint">
                   Best on <span className="text-muted">Claude Code</span> (live progress, the agentic apply + AI search,
                   reliable evaluation persistence). Other CLIs work for the core flows with reduced features.

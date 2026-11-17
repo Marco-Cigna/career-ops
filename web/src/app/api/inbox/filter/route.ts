@@ -30,7 +30,7 @@ export async function GET(req: Request) {
   const resolved = resolve(new URL(req.url).searchParams.get("cliId"));
   if (!resolved) return NextResponse.json({ error: "Choose an AI tool on the Config page first." }, { status: 404 });
   const plan = filterPlan(resolved.spec.id, await loadPipelineSettings());
-  return NextResponse.json({ cliId: resolved.spec.id, triage: plan.triage, model: plan.model, effort: plan.effort, reason: plan.reason });
+  return NextResponse.json({ cliId: resolved.spec.id, cliName: resolved.spec.name, triage: plan.triage, model: plan.model, effort: plan.effort, reason: plan.reason });
 }
 
 export async function POST(req: Request) {
