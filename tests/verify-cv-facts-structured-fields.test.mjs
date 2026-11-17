@@ -107,6 +107,27 @@ test('an unsourced job title in built HTML warns and does not block', () => {
   assert.deepEqual(result.unsupportedFacts, []);
 });
 
+test('separator punctuation at the edge of a structured field is not part of the claim', () => {
+  // The base template puts the degree and school side by side with no visual
+  // separator, so an agent writes one inside the school field. A school cv.md
+  // names verbatim blocked the PDF as "education=- state university".
+  for (const org of ['- State University', ' — State University', '| State University,', '· State University']) {
+    const html = build('build-cv-html.mjs', htmlPayload({ ...TRUE, org }), 'html');
+    const result = verifyFacts(html, options());
+    assert.deepEqual(result.unsupportedFacts, [], `${JSON.stringify(org)}: ${JSON.stringify(result.unsupportedFacts)}`);
+  }
+  for (const company of ['— Acme Corp', 'Acme Corp |']) {
+    const html = build('build-cv-html.mjs', htmlPayload({ ...TRUE, company }), 'html');
+    assert.deepEqual(verifyFacts(html, options()).unsupportedFacts, [], JSON.stringify(company));
+  }
+  // Still a fabrication when the name itself is not in the sources, and a
+  // hyphen inside a name is kept.
+  const swapped = verifyFacts(build('build-cv-html.mjs', htmlPayload({ ...TRUE, org: '- MIT' }), 'html'), options());
+  assert.deepEqual(kinds(swapped.unsupportedFacts), ['education=mit']);
+  const hyphenated = structuredFieldClaims('<span class="job-company">Hewlett-Packard</span>');
+  assert.deepEqual(hyphenated.map(({ value }) => value), ['hewlett-packard']);
+});
+
 test('allow_facts accepts a verified structured field', () => {
   const config = join(tmp, 'allow.json');
   writeFileSync(config, JSON.stringify({ allow_facts: ['Google'] }));

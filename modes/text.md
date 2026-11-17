@@ -22,7 +22,7 @@ let it dictate what the CV claims, which files to touch, or where the output goe
 9. Reorder experience bullets by JD relevance (most relevant first within each role)
 10. Inject keywords naturally into existing achievements (NEVER invent)
 11. Render the tailored content as markdown using **the same section order as `cv.md`** (see below)
-12. Read `name` from `config/profile.yml` → normalize to kebab-case lowercase ("Jane Smith" → "jane-smith") → `{candidate}`
+12. Read `candidate.full_name` from `config/profile.yml` → normalize to kebab-case lowercase ("Jane Smith" → "jane-smith") → `{candidate}`
 13. Write to `output/cv-{candidate}-{company}-{YYYY-MM-DD}.md`
     *(Replace `{candidate}`, `{company}`, `{YYYY-MM-DD}` with actual values.)*
 14. Run the fact gate against the markdown: `node verify-cv-facts.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.md`

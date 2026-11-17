@@ -1262,6 +1262,18 @@ function extractStructuredFieldInners(raw, cls) {
   return findBalancedElements(raw, openRe).map(el => raw.slice(el.contentStart, el.contentEnd));
 }
 
+// Separator punctuation a template or an agent puts between two adjacent fields
+// ("Bachelor of Engineering — University of X", "Acme | Sydney"). It sits
+// INSIDE the field's markup when the template gives the two fields no visual
+// separator of its own, so it reached the source lookup as part of the name
+// ("- university of x") and blocked a school that cv.md names verbatim. Only
+// the edges are trimmed: a dash inside a name ("Hewlett-Packard", "Rolls-Royce")
+// is part of the name and stays.
+const FIELD_EDGE_SEPARATORS_RE = /^[\s\-‐‑‒–—―|·•∙:,;/@]+|[\s\-‐‑‒–—―|·•∙:,;/@]+$/g;
+function trimFieldSeparators(text) {
+  return String(text ?? '').replace(FIELD_EDGE_SEPARATORS_RE, '');
+}
+
 /**
  * Employer, education, certification, award and title claims a CV builder emitted as
  * structured fields.
@@ -1273,8 +1285,8 @@ export function structuredFieldClaims(text) {
   const raw = latexBody(text ?? '');
   const claims = [];
   const add = (kind, inner, blocking) => {
-    const line = stripMarkup(inner);
-    const value = normalizeFact(line);
+    const line = trimFieldSeparators(stripMarkup(inner));
+    const value = normalizeFact(trimFieldSeparators(normalizeFact(line)));
     if (value) claims.push({ kind, value, line, blocking });
   };
   for (const [cls, kind, blocking] of STRUCTURED_HTML_FIELDS) {
@@ -1305,7 +1317,7 @@ export function structuredFieldClaims(text) {
 // Unsupported source conventions warn; explicit contradictions in recognized
 // records block. Titles and lexical metric context remain advisory.
 function sourceExperience(text) {
-  return findExperienceSections(text).flatMap(lines => {
+  return findExperienceSections(text, { includeSecondary: true }).flatMap(lines => {
     const starts = lines.flatMap((line, i) => headingText(line, 3) === null ? [] : [i]);
     return starts.flatMap((start, i) => {
       const block = lines.slice(start, starts[i + 1] ?? lines.length);
@@ -1330,11 +1342,25 @@ function sourceEducation(text) {
     if (!inEducation || !line.trim() || /^\s*[-*_]{3,}\s*$/.test(line)) continue;
     // The flat convention used in examples/cv-example.md. A multiline or
     // table convention needs its own parser; don't infer a tuple from prose.
-    const match = toPlainText(line).replace(/^\s*[-*+]\s+/, '').match(/^([^,]+),\s*(.+?)(?:\s*\(((?:19|20)\d{2})\))?\s*$/);
+    // Only a top-level entry line is a record. An indented sub-bullet (thesis,
+    // coursework) describes the entry above it.
+    if (/^\s{2,}[-*+]\s/.test(line)) continue;
+    let body = toPlainText(line).replace(/^\s*[-*+]\s+/, '').trim();
+    // A trailing parenthetical holding a year is the date: "(2019)",
+    // "(Feb 2018-Mar 2022)".
+    const dated = body.match(/^(.*?)\s*\(([^()]*\b(?:19|20)\d{2}\b[^()]*)\)\s*$/);
+    const year = dated ? dated[2].trim() : '';
+    if (dated) body = dated[1];
+    const parts = body.split(',').map(part => part.trim());
+    if (parts.length < 2 || parts.some(part => !part)) { complete = false; continue; }
     // Extra comma-separated detail may be a location, GPA or part of the
-    // school name. It is not evidence of a different degree-school pair.
-    if (match && !match[2].includes(',')) entries.push({ title: match[1].trim(), org: match[2].trim(), year: match[3] || '' });
-    else complete = false;
+    // school name ("University of California, Berkeley"), so every prefix
+    // after the degree is a candidate school for that one degree. Same title
+    // on every candidate, so this can only add a matching pair, never a
+    // contradicting one.
+    for (let end = 2; end <= parts.length; end++) {
+      entries.push({ title: parts[0], org: parts.slice(1, end).join(', '), year });
+    }
   }
   return { entries, complete };
 }
@@ -1366,8 +1392,8 @@ function datesSupported(target, source) {
 /** Source-bound contradictions and explicit coverage gaps in default HTML CV records. */
 export function structuredAssociationClaims(targetText, sourceTexts, config = {}) {
   const blocked = [], advisory = [], gaps = new Set();
-  const norm = value => normalizeFact(stripMarkup(value));
-  const field = (html, cls) => extractStructuredFieldInners(html, cls).map(inner => stripMarkup(inner)).join(' ').trim();
+  const norm = value => normalizeFact(trimFieldSeparators(normalizeFact(trimFieldSeparators(stripMarkup(value)))));
+  const field = (html, cls) => extractStructuredFieldInners(html, cls).map(inner => trimFieldSeparators(stripMarkup(inner))).join(' ').trim();
   const blocks = cls => extractStructuredFieldInners(String(targetText), cls);
   const experience = sourceTexts.flatMap(sourceExperience);
   const educationSources = sourceTexts.map(sourceEducation);

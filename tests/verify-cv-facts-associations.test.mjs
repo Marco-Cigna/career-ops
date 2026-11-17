@@ -183,7 +183,29 @@ test('comma-delimited education details cannot turn a truthful pair into a block
   const source = CV.replace('MS Data Science, Tech Institute (2017)',
     'MS Data Science, State University, GPA 4.0 (2017)');
   const result = check({ education: [{ title: 'MS Data Science', org: 'State University', year: '2017' }] }, source);
-  assert.equal(result.verdict, 'warn', JSON.stringify(result));
+  // Each comma prefix is a candidate school for the one degree, so the
+  // truthful pair is now verified rather than left unchecked.
+  assert.equal(result.verdict, 'pass', JSON.stringify(result));
   assert.equal(result.unsupportedFacts.some(f => f.kind === 'education-association'), false);
-  assert.ok(result.coverage?.message.includes('Education'));
+});
+
+test('a school line with a location, a month range and sub-bullets is read as one record', () => {
+  const source = CV.replace('MS Data Science, Tech Institute (2017)',
+    '- MS Data Science, Tech Institute, Boston, USA (Feb 2015-Mar 2017)\n  - Thesis: graph partitioning.');
+  const truthful = check({ education: edu(1, { year: 'Feb 2015-Mar 2017' }) }, source);
+  assert.equal(truthful.verdict, 'pass', JSON.stringify(truthful));
+  const moved = check({ education: edu(1, { year: 'Feb 2013-Mar 2015' }) }, source);
+  assert.ok(moved.unsupportedFacts.some(f => f.kind === 'graduation-date'), JSON.stringify(moved));
+});
+
+test('a role under Additional Experience is employment evidence', () => {
+  const source = CV.replace('## Education', '## Additional Experience\n\n### Corner Cafe — Copenhagen\n**Barista**\n2025 – 2025\n\n## Education');
+  const html = check({}, source);
+  assert.equal(html.verdict, 'pass');
+  // Read through the payload's main experience list, the same way a CV that
+  // folds the role into one history renders it.
+  const result = check({ company: 'Corner Cafe', role: 'Barista', dates: '2025 – 2025', bullets: [] }, source);
+  assert.equal(result.verdict, 'pass', JSON.stringify(result));
+  const wrongDates = check({ company: 'Corner Cafe', role: 'Barista', dates: '2021 – 2022', bullets: [] }, source);
+  assert.ok(wrongDates.unsupportedFacts.some(f => f.kind === 'employment-dates'), JSON.stringify(wrongDates));
 });
