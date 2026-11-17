@@ -106,6 +106,69 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* ── Installed-app title bar ────────────────────────────────────────────────
+   Installed as an app with the window-controls overlay on (manifest.ts), the
+   window has no title bar: the page reaches the top edge and the minimise /
+   maximise / close buttons float over its top-right corner. The sidebar then
+   runs the full height of the window, and the main column keeps a strip of
+   the title bar's height clear: it is what the window is dragged by, and it
+   keeps page content out from under the buttons, also while scrolling.
+   In a browser tab or a plain app window none of this matches. */
+.co-titlebar,
+.co-titlebar-side {
+  display: none;
+}
+@media (display-mode: window-controls-overlay) {
+  :root {
+    --titlebar-h: env(titlebar-area-height, 33px);
+  }
+  .co-titlebar {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 45; /* over the mobile top bar (30), under modals (50) */
+    height: var(--titlebar-h);
+    background: var(--bg);
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  /* The strip covers the mobile top bar's slot, so everything moves down. */
+  body {
+    padding-top: var(--titlebar-h);
+  }
+  html .co-mnav {
+    top: var(--titlebar-h);
+  }
+  html .co-mdrawer {
+    padding-top: calc(var(--titlebar-h) + 0.25rem);
+  }
+  @media (min-width: 48rem) {
+    /* Desktop: the strip starts where the sidebar (w-60) ends, and only the
+       main column moves down. The sidebar is dragged by the gap above its logo. */
+    .co-titlebar {
+      left: 15rem;
+    }
+    body {
+      padding-top: 0;
+    }
+    #main-content {
+      padding-top: var(--titlebar-h);
+    }
+    .co-titlebar-side {
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1rem;
+      -webkit-app-region: drag;
+      app-region: drag;
+    }
+  }
+}
+
 /* Inter's weights and tracking for the roles that used other faces. In the
    components layer, so a utility on the same element (font-semibold,
    tracking-tight) still wins. */

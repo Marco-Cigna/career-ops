@@ -32,9 +32,13 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
       >
         Skip to content
       </a>
+      {/* Installed-app title bar (globals.css): zero height unless the window
+          draws its own title bar, then the strip the window is dragged by. */}
+      <div aria-hidden className="co-titlebar print:hidden" />
       <MobileNav followupsEnabled={followupsEnabled} />
       <div className="flex min-h-screen">
         <aside className="sticky top-0 hidden print:hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
+          <div aria-hidden className="co-titlebar-side" />
           <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
             <CoMark size={32} />
             <span className={`font-display relative -top-px text-2xl font-normal tracking-tight text-landing`}>

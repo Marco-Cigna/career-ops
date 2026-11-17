@@ -8,7 +8,9 @@ import { readFollowupsEnabled } from "@/lib/followups-server";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "career-ops — official web experience",
+  // Just the name: an app window (Edge --app, or installed) prints this in its
+  // title bar, where a tagline reads as a web page's title.
+  title: "career-ops",
   description: "The official, local-first web experience for career-ops.",
   // Home-screen / standalone (iOS): let our theme-color flow up to the status bar
   // + Dynamic Island; safe-area insets handle the layout.
