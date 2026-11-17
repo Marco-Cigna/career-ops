@@ -14,10 +14,12 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
+import { agentRelativePath, isRepairableRenderFailure, keepFailedHtml, repairBudgetMs, runCvRepair } from "@/lib/cv-repair.mjs";
+import type { ChildProcess } from "node:child_process";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
-import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { buildCvRepairPrompt, buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
 import { writeEvalContextPack } from "@/lib/eval-context-pack.mjs";
 import { fillJdArchive } from "@/lib/jd-archive-fill.mjs";
@@ -34,6 +36,7 @@ import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
 import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.mjs";
 import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
+import { withProseStyle, writeProseStyleFile } from "@/lib/answer-style-prompt.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 import { effortForRun, modelForRun } from "@/lib/pipeline-gate.mjs";
 import { agentMode } from "@/lib/tools-catalog.mjs";
@@ -44,6 +47,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
+  // The pdf correction pass (cv-repair.mjs) runs only when enough of
+  // maxDuration is left for it and a second render.
+  const runStartedAt = Date.now();
   const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown; gate?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
@@ -222,6 +228,9 @@ export async function POST(req: Request) {
   let jdForArchive: string | null = null;
   let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
   let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
+  // Kept for the pdf correction pass, which launches the same CLI with the same
+  // argv shape and the same fencing as the first pass.
+  let buildArgsFn: ((p: string) => string[]) | null = null;
   try {
     // Read the JD here, not in the worker: WebFetch drops script content, so a
     // board that renders its JD from script data looks like an empty shell to the
@@ -295,7 +304,7 @@ export async function POST(req: Request) {
         })
       : null;
     if (contextPack) gateNotes.push(`Context: reference pack ${contextPack.hash} (about ${Math.round(contextPack.chars / 4000)}k tokens, shared across runs through the prompt cache)`);
-    const prompt = buildPrompt({
+    const basePrompt = buildPrompt({
       kind,
       input,
       memory: readMemory(),
@@ -316,6 +325,13 @@ export async function POST(req: Request) {
       closedEvidence,
       contextPack: contextPack !== null,
     });
+    // Cover letters get the humanizer-derived writing rules (answer-style-prompt.mjs):
+    // a content-hashed system-prompt file on Claude, so it stays in the prompt
+    // cache across runs, and a preamble on every other CLI.
+    const styled = kind === "cover" ? withProseStyle(cliId, basePrompt, "cover-letter") : null;
+    const prompt = styled?.prompt ?? basePrompt;
+    const styleFile = styled?.systemPrompt ? writeProseStyleFile(careerOpsRoot(), "cover-letter") : null;
+    if (styled) gateNotes.push("Style: humanizer writing rules for cover letters");
 
     const isClaude = cliId === "claude";
     // Which tools each kind gets, and the whole claude argv, live in
@@ -333,10 +349,11 @@ export async function POST(req: Request) {
     // envelope-parsing routes rely on.
     const buildArgs = (p: string) =>
       isClaude
-        ? claudeCliArgs({ kind, prompt: p, model, effort, systemPromptFile: contextPack?.file })
+        ? claudeCliArgs({ kind, prompt: p, model, effort, systemPromptFile: contextPack?.file ?? styleFile ?? undefined })
         : cliId === "codex"
           ? codexStreamArgs(p, { model, effort })
           : (spec.streamArgs ?? spec.args)(p);
+    buildArgsFn = buildArgs;
     // The prompt inlines the whole _profile.md (#4003), so it can outgrow the OS
     // command-line limit (ENAMETOOLONG on Windows). Every kind that reaches here
     // can Read (see TOOL_SCOPES), so an oversized prompt goes to a file under the
@@ -391,6 +408,8 @@ export async function POST(req: Request) {
   // cancel() must not release the tracker guard until that work settles.
   let pdfRenderPromise: Promise<void> | null = null;
   let evaluatePersistPromise: Promise<void> | null = null;
+  // The pdf correction pass's agent, while it runs, so cancel() can stop it too.
+  let repairChild: ChildProcess | null = null;
   // Cancellation only requests termination. Keep the guard until the child
   // actually closes and any render or persist work has finished.
   const finishRun = createRunFinalizer(child, () => {
@@ -633,7 +652,58 @@ export async function POST(req: Request) {
           close();
         }
       };
-      const renderPdf = async (paths: PdfPaths, envelope: CvEnvelope) => {
+      // One correction pass when the render gates reject the CV (cv-repair.mjs).
+      // The web worker cannot run those gates itself, so without this a single
+      // slip threw away the whole tailoring run. Resolves to the corrected,
+      // saved envelope, or null when no pass ran or it produced nothing usable.
+      const repairCv = async (paths: PdfPaths, rejectedHtml: string, failure: string): Promise<CvEnvelope | null> => {
+        if (closed || !buildArgsFn) return null;
+        const killMs = repairBudgetMs({ startedAt: runStartedAt, now: Date.now(), maxDurationS: maxDuration });
+        if (killMs === null) {
+          sendWarnings(["Not enough of this run's time limit is left for an automatic correction pass."]);
+          return null;
+        }
+        const file = keepFailedHtml(paths, rejectedHtml);
+        if (!file) return null;
+        send({ type: "text", text: `\n↻ The render gates rejected the CV. Running one correction pass:\n${failure}\n\n` });
+        send({ type: "status", label: "Correcting the CV…" });
+        const repairPrompt = buildCvRepairPrompt({
+          failure,
+          failedHtml: agentRelativePath(file, careerOpsRoot()),
+          input,
+          codeRoot,
+          pageFormat,
+          profile: profileRef(careerOpsRoot()),
+        });
+        let repairSpill: ReturnType<typeof spillOversizedPrompt> | undefined;
+        try {
+          repairSpill = spillOversizedPrompt({ prompt: repairPrompt, buildArgs: buildArgsFn, binPath, fencing: { cliId, capabilities }, root: careerOpsRoot() });
+          const spilled = repairSpill;
+          const run = await runCvRepair({
+            spawnChild: () => spawnHeadlessCli(binPath, spilled.args, { cwd: careerOpsRoot(), env: process.env }, { cliId, capabilities }),
+            parseEvent: spec.parseEvent,
+            killMs,
+            onChild: (c: ChildProcess) => { repairChild = c; },
+          });
+          lastTokens += run.tokens;
+          if (typeof run.costUsd === "number") lastCostUsd = (lastCostUsd ?? 0) + run.costUsd;
+          if (run.narration.trim()) send({ type: "text", text: run.narration.trim() + "\n" });
+          if (run.envelope.ok !== true) {
+            sendWarnings([`The correction pass produced no CV: ${run.envelope.error}`]);
+            return null;
+          }
+          sendWarnings(run.envelope.warnings);
+          if (!saveCv(paths, run.envelope)) return null;
+          return run.envelope;
+        } catch (e) {
+          sendWarnings([`The correction pass failed: ${e instanceof Error ? e.message : String(e)}`]);
+          return null;
+        } finally {
+          repairChild = null;
+          repairSpill?.cleanup?.();
+        }
+      };
+      const renderPdf = async (paths: PdfPaths, firstEnvelope: CvEnvelope) => {
         send({ type: "status", label: "Rendering PDF…" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
         // the one place nothing else awaits or catches this promise (cancel()
@@ -641,26 +711,42 @@ export async function POST(req: Request) {
         // unexpected exception here must still close the stream instead of
         // leaving it — and the write-token — open until process shutdown.
         try {
-          // The profile outranks the agent's pick, and auto maps the country it
-          // named, both through the core (core/page-format.mjs).
-          const sheet = await resolveRenderPageFormat(codeRoot, {
-            setting: pageFormat?.setting ?? null,
-            declared: envelope.format,
-            country: envelope.country,
-          });
-          sendWarnings(sheet.warnings);
-          const format = sheet.format;
-          const result = await renderAndMarkPdf({
-            spawnFn: spawn,
-            execPath: process.execPath,
-            coreRoot: resolveCodeRoot(process.cwd(), process.env),
-            dataRoot: careerOpsRoot(),
-            pdfPaths: paths,
-            format,
-            reportNum: paths.reportNum,
-          });
+          const renderEnvelope = async (envelope: CvEnvelope) => {
+            // The profile outranks the agent's pick, and auto maps the country it
+            // named, both through the core (core/page-format.mjs).
+            const sheet = await resolveRenderPageFormat(codeRoot, {
+              setting: pageFormat?.setting ?? null,
+              declared: envelope.format,
+              country: envelope.country,
+            });
+            sendWarnings(sheet.warnings);
+            return renderAndMarkPdf({
+              spawnFn: spawn,
+              execPath: process.execPath,
+              coreRoot: resolveCodeRoot(process.cwd(), process.env),
+              dataRoot: careerOpsRoot(),
+              pdfPaths: paths,
+              format: sheet.format,
+              reportNum: paths.reportNum,
+            });
+          };
+          let envelope = firstEnvelope;
+          let result = await renderEnvelope(envelope);
+          if (result.kind === "render-failed" && isRepairableRenderFailure(result.error)) {
+            const corrected = await repairCv(paths, envelope.html, result.error);
+            if (corrected) {
+              envelope = corrected;
+              send({ type: "status", label: "Rendering the corrected PDF…" });
+              result = await renderEnvelope(envelope);
+              if (result.kind === "rendered") result.warnings.unshift("The first CV failed the render gates; this PDF is from the automatic correction pass.");
+            }
+          }
           if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 1500) });
+            // Keep what the user would otherwise lose: the last CV the agent
+            // wrote, so it can be opened and fixed by hand.
+            const kept = isRepairableRenderFailure(result.error) ? keepFailedHtml(paths, envelope.html) : null;
+            const where = kept ? `\nThe rejected CV is kept at ${kept}` : "";
+            send({ type: "error", msg: result.error.slice(0, 1500) + where });
             return;
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
@@ -797,6 +883,7 @@ export async function POST(req: Request) {
       if (heartbeat) clearInterval(heartbeat);
       if (killer) clearTimeout(killer);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
+      try { repairChild?.kill("SIGTERM"); } catch { /* ignore */ }
       const followup = pdfRenderPromise ?? evaluatePersistPromise;
       if (followup) {
         // Render/mark or evaluate persist keeps running after this client
