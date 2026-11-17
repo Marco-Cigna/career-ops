@@ -3,6 +3,7 @@ import { PipelinePageSkeleton } from "@/components/page-loading-skeletons";
 import { pdfReadyForReport, pipelineSummary, readTrackerShape, withCloseDates, type InboxJob } from "@/lib/career-ops";
 import { reportNumberFromCell } from "@/lib/apply/cv-selection.mjs";
 import { pendingInbox } from "@/lib/inbox-pending.mjs";
+import { discardedInbox } from "@/lib/inbox-discarded.mjs";
 import { PipelineView } from "@/components/pipeline-view";
 import { pipelineTab } from "@/lib/pipeline-navigation.mjs";
 import { scorePosting } from "@/lib/core/inbox-rank.mjs";
@@ -10,15 +11,17 @@ import { applyInboxFit, loadFitTargets } from "@/lib/inbox-fit-profile.mjs";
 
 export const dynamic = "force-dynamic"; // always read fresh local files
 
-// Tracker tabs show the inbox only as a count, so they get the count and not
-// the postings. The inbox is most of the page payload on a large pipeline.
+// Send inbox postings only on Inbox and Filter removals only on Discarded;
+// other tabs need just the counts, keeping their page payload small.
 export default async function PipelinePage({ searchParams }: { searchParams: Promise<{ tab?: string | string[] }> }) {
   const { tab } = await searchParams;
   const onInbox = pipelineTab(tab) === "INBOX";
+  const onDiscarded = pipelineTab(tab) === "DISCARDED";
   const summary = pipelineSummary();
   const applications = await withCloseDates(summary.applications);
   const { inbox } = summary;
   const pending = pendingInbox(inbox);
+  const discarded = discardedInbox(inbox, applications);
   const fitted = onInbox ? withInboxFit(pending) : null;
   const trackerShape = readTrackerShape();
   // Tracker row numbers whose tailored CV is indexed (data/pdf-index.tsv) AND on
@@ -44,6 +47,8 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
         applications={applications}
         inbox={fitted ? fitted.jobs : null}
         inboxCount={pending.length}
+        discarded={onDiscarded ? discarded : null}
+        discardedCount={discarded.length}
         inboxFitError={fitted?.error ?? null}
         trackerShape={trackerShape}
         cvRows={cvRows}

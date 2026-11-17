@@ -11,6 +11,8 @@ import { CANONICAL_STATES, scoreNum, scoreTone } from "@/lib/format";
 import { StatusSelect } from "@/components/status-select";
 import { applicationKey, applySavedStatus, saveStatuses } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
+import { DiscardedInbox } from "@/components/inbox/discarded-inbox";
+import { filterDiscardedInbox } from "@/lib/inbox-discarded.mjs";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
 import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
@@ -58,6 +60,8 @@ export function PipelineView({
   applications,
   inbox,
   inboxCount,
+  discarded = null,
+  discardedCount = 0,
   inboxFitError = null,
   trackerShape = "rows",
   cvRows = [],
@@ -65,6 +69,8 @@ export function PipelineView({
   applications: Application[];
   inbox: InboxJob[] | null;
   inboxCount: number;
+  discarded?: InboxJob[] | null;
+  discardedCount?: number;
   inboxFitError?: string | null;
   trackerShape?: "missing" | "empty" | "malformed" | "rows";
   /** Tracker row numbers that have a tailored CV PDF on disk. */
@@ -363,6 +369,10 @@ export function PipelineView({
   );
 
   const filtering = query !== "" || minFilter != null;
+  const filteredDiscards = useMemo(
+    () => tab === "DISCARDED" ? filterDiscardedInbox(discarded ?? [], query, minFilter) : [],
+    [tab, discarded, query, minFilter],
+  );
   const tabLabel = tab === "ALL" ? null : tab.charAt(0) + tab.slice(1).toLowerCase();
   // The empty state needs the All-tab match count. Memoize it with the same
   // inputs as the table filter so a keystroke, while the deferred query is
@@ -372,7 +382,7 @@ export function PipelineView({
     [visibleApplications, matchesFilters],
   );
   const emptyState =
-    filtered.length > 0
+    filtered.length > 0 || filteredDiscards.length > 0
       ? null
       : trackerEmptyState({ tabLabel, query, minScore: minFilter, matchesInAll });
   const searchInput = useRef<HTMLInputElement>(null);
@@ -392,7 +402,7 @@ export function PipelineView({
       clearSearch,
       clearMin: () => setParams({ min: null }),
     });
-  const filterStatus = isPending || !filtering ? "" : empty ? empty.heading : `${filtered.length} of ${tabRows.length} shown`;
+  const filterStatus = isPending || !filtering ? "" : empty ? empty.heading : `${filtered.length + filteredDiscards.length} of ${tabRows.length + (tab === "DISCARDED" ? discardedCount : 0)} shown`;
 
   const filterKey = `${visibleTab}|${deferredQ}|${sort.key}|${sort.dir}|${minFilter ?? ""}|${filtered.length}`;
   const [windowState, setWindowState] = useState<{ key: string; span: { start: number; end: number } } | null>(null);
@@ -783,7 +793,7 @@ export function PipelineView({
               ? inboxCount
               : t === "ALL"
                 ? visibleApplications.length
-                : visibleApplications.filter((r) => rowOnPipelineTab(r.status, t)).length;
+                : visibleApplications.filter((r) => rowOnPipelineTab(r.status, t)).length + (t === "DISCARDED" ? discardedCount : 0);
           if (t === "OTHER" && count === 0 && visibleTab !== "OTHER") return null;
           return (
             <button
@@ -902,8 +912,12 @@ export function PipelineView({
         </div>
       )}
 
-      {visibleTab !== "INBOX" && (
+      {visibleTab !== "INBOX" && (tabRows.length > 0 || visibleTab !== "DISCARDED") && (
         <p className="mt-2 text-xs text-faint">j and k move. 1 Evaluated, 2 Applied, 3 Responded, 4 Interview, 5 Offer, 6 Rejected, 7 Discarded, 8 SKIP. Shift-click selects the rows in between.</p>
+      )}
+
+      {visibleTab === "DISCARDED" && !isPending && filteredDiscards.length > 0 && (
+        <DiscardedInbox jobs={filteredDiscards} />
       )}
 
       {visibleTab === "INBOX" ? (
@@ -1018,7 +1032,7 @@ export function PipelineView({
             )}
           </table>
         </div>
-      ) : trackerEmptyMessage({ shape: trackerShape, query, min: minFilter, tab }).kind === "filtered" ? (
+      ) : filteredDiscards.length > 0 ? null : trackerEmptyMessage({ shape: tab === "DISCARDED" && discardedCount > 0 ? "rows" : trackerShape, query, min: minFilter, tab }).kind === "filtered" ? (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
           <h2 className="font-display text-lg">{empty?.heading}</h2>
           {empty && empty.actions.length > 0 && (

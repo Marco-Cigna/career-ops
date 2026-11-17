@@ -11,6 +11,7 @@ import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { LinkedInPaste } from "@/components/linkedin-paste";
 import { orderInbox } from "@/lib/core/inbox-rank.mjs";
+import { orderInboxByFilterScore } from "@/lib/inbox-filter-sort.mjs";
 import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
@@ -47,7 +48,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const [sortMode, setSortMode] = useState<"fit" | "newest" | "added">("fit");
+  const [sortMode, setSortMode] = useState<"fit" | "filter" | "newest" | "added">("fit");
   // Filter results from this session, ahead of the page refresh that brings them
   // in from data/inbox-triage.json; and the All / Passed filter view.
   const [live, setLive] = useState<Map<string, FilterOutcome>>(() => new Map());
@@ -208,11 +209,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // scan added each row, best fit first within a day (orderInbox breaks date
   // ties by input order, and the input is the fit order).
   const ordered = useMemo(() => {
-    const fitOrMode = orderInbox(filtered.map((entry) => ({
+    const entries = filtered.map((entry) => ({
       ...entry,
       postedAt: entry.job.postedAt ?? entry.job.addedAt,
       fit: entry.job.fit ?? null,
-    })), sortMode === "added" ? "fit" : sortMode);
+      triage: entry.job.triage,
+    }));
+    if (sortMode === "filter") return orderInboxByFilterScore(entries);
+    const fitOrMode = orderInbox(entries, sortMode === "added" ? "fit" : sortMode);
     if (sortMode !== "added") return fitOrMode;
     return orderInbox(fitOrMode.map((entry) => ({ ...entry, postedAt: entry.job.addedAt })), "newest");
   }, [filtered, sortMode]);
@@ -449,13 +453,14 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       </div>
 
       {/* batch header: fresh/filtered slice by default; "See all" lifts the cap */}
-      <div ref={listTopRef} className="mt-4 flex items-baseline justify-between gap-3">
+      <div ref={listTopRef} className="mt-4 flex flex-wrap items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
-          {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : view === "passed" ? `${filtered.length} passed the filter` : capped ? (sortMode === "newest" ? "Fresh — worth a look" : sortMode === "added" ? "Just added" : "Best fits") : "All roles"}
+          {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : view === "passed" ? `${filtered.length} passed the filter` : capped ? (sortMode === "newest" ? "Fresh — worth a look" : sortMode === "added" ? "Just added" : sortMode === "filter" ? "Highest filter scores" : "Best fits") : "All roles"}
         </p>
-        <div className="flex items-center gap-3">
-          <div role="group" aria-label="Sort inbox" className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-3">
+          <div role="group" aria-label="Sort inbox" className="flex flex-wrap items-center gap-2 text-xs">
             <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
+            <button type="button" aria-pressed={sortMode === "filter"} onClick={() => setSortMode("filter")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "filter" ? "font-medium text-foreground" : "text-faint")} title="Highest triage score first; jobs without a filter score last">Filter score</button>
             <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")} title="By the employer's posting date">Newest</button>
             <button type="button" aria-pressed={sortMode === "added"} onClick={() => setSortMode("added")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "added" ? "font-medium text-foreground" : "text-faint")} title="By the day a scan added it to your inbox">Just added</button>
           </div>
