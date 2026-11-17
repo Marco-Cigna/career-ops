@@ -77,8 +77,8 @@ test("the gate hands codex's triage model and effort to the triage call", async 
 
 test("codex argv: model and effort flags pass the fencing check", () => {
   const stream = codexStreamArgs("p", { model: "gpt-6.1-sol", effort: "high" });
-  assert.deepEqual(stream, ["exec", "--json", "--color", "never", "-m", "gpt-6.1-sol", "-c", "model_reasoning_effort=high", "p"]);
-  assert.deepEqual(codexStreamArgs("p"), ["exec", "--json", "--color", "never", "p"]);
+  assert.deepEqual(stream, ["exec", "--json", "--color", "never", "--skip-git-repo-check", "-m", "gpt-6.1-sol", "-c", "model_reasoning_effort=high", "p"]);
+  assert.deepEqual(codexStreamArgs("p"), ["exec", "--json", "--color", "never", "--skip-git-repo-check", "p"]);
   const fenced = fenceArgs({ cliId: "codex", capabilities: CAPS.networkReadOnly, args: stream }).args;
   assert.ok(fenced.includes("model_reasoning_effort=high"));
   const triage = codexTriageArgs({ model: "gpt-6-luna", effort: "high", outputFile: "/t/a.txt" });

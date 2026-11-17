@@ -10,7 +10,11 @@ import "../helpers/web-ts-alias-loader.mjs";
 // would still pass if the route stopped handing it the captured stderr line. This goes
 // through the real request handler with a stand-in CLI that prints one stderr line, no
 // stdout, and exits 0 (what Antigravity does when headless mode auto-denies a tool).
-const cliStub = `export const resolveCliOrFallback = () => ({ spec: { id: "claude" }, binPath: "/fixture/never-run" });
+const cliStub = `import { isFatalCodexStderr } from "@/lib/run-cli-support.mjs";
+export const resolveCliOrFallback = () => {
+  const id = globalThis.__fakeCliRun?.cliId ?? "claude";
+  return { spec: { id, name: id, stderrIsFatal: id === "codex" ? isFatalCodexStderr : undefined }, binPath: "/fixture/never-run" };
+};
 export const cliSubstitutionNotice = () => null;
 export const cliUnavailableError = () => ({ error: "Fixture CLI unavailable" });`;
 const spawnStub = `import { EventEmitter } from "node:events";
@@ -44,7 +48,7 @@ const AGY_LINE =
   'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json.\n';
 
 /** Run one evaluation against a fake CLI and return the streamed events. */
-async function streamedEvents(t, { stderr, code }) {
+async function streamedEvents(t, { stderr, code, cliId = "claude" }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "co-stderr-handoff-"));
   const previousRoot = process.env.CAREER_OPS_ROOT;
   const previousCode = process.env.CAREER_OPS_CODE_ROOT;
@@ -61,10 +65,10 @@ async function streamedEvents(t, { stderr, code }) {
   fs.mkdirSync(path.join(root, "modes"));
   fs.writeFileSync(path.join(root, "modes/oferta.md"), "# Fictional evaluation mode\n");
   fs.writeFileSync(path.join(root, "cv.md"), "# Fictional candidate\n");
-  globalThis.__fakeCliRun = { stderr, code };
+  globalThis.__fakeCliRun = { stderr, code, cliId };
   const response = await POST(new Request("http://fixture.invalid/api/run", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "evaluate", cliId: "claude", input: "https://jobs.example.test/1" }),
+    body: JSON.stringify({ kind: "evaluate", cliId, input: "https://jobs.example.test/1" }),
   }));
   assert.equal(response.status, 200);
   return (await response.text()).split("\n").filter(Boolean).map((line) => JSON.parse(line));
@@ -87,4 +91,12 @@ test("a clean exit with no stdout and no stderr keeps the generic message", asyn
     error.msg,
     "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)",
   );
+});
+
+test("a Codex Git startup rejection reaches the error event separately from the access warning", async (t) => {
+  const cause = "Not inside a trusted directory and --skip-git-repo-check was not specified.";
+  const events = await streamedEvents(t, { cliId: "codex", stderr: [cause + "\n"], code: 1 });
+  assert.equal(events.find((event) => event.type === "error")?.msg, `Codex could not start: ${cause}`);
+  assert.ok(events.some((event) => event.type === "status" && /only partly restricted/.test(event.label)));
+  assert.equal(events.some((event) => event.type === "done"), false);
 });

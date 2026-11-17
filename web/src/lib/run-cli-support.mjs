@@ -90,14 +90,17 @@ const CODEX_TRANSIENT_ERROR_RE = /reconnect/i;
  * Codex can emit benign ERROR-level diagnostics (e.g. a stale local model-cache
  * schema) and still complete successfully, so anything outside the auth/quota
  * set is left to its JSONL stream and exit code — and even a quota/rate-limit
- * line is non-fatal while it says the CLI is retrying.
+ * line is non-fatal while it says the CLI is retrying. The Git-directory
+ * startup rejection is also captured: it happens before the JSONL stream.
  *
  * @param {string} line
  * @returns {boolean}
  */
 export function isFatalCodexStderr(line) {
-  return FATAL_AUTH_STDERR_RE.test(line) || isFatalQuotaStderr(line);
+  return CODEX_UNTRUSTED_DIRECTORY_RE.test(line) || FATAL_AUTH_STDERR_RE.test(line) || isFatalQuotaStderr(line);
 }
+
+const CODEX_UNTRUSTED_DIRECTORY_RE = /^Not inside a trusted directory and --skip-git-repo-check was not specified\.?\s*$/;
 
 /**
  * Whether one Claude Code stderr chunk should be treated as a fatal error.
@@ -166,7 +169,21 @@ const GENERIC_FATAL_STDERR_RE =
  * @returns {string[]}
  */
 export function codexStreamArgs(prompt, opts = {}) {
-  return ["exec", "--json", "--color", "never", ...codexModelFlags(opts), prompt];
+  const [command, ...args] = codexTextArgs(prompt, opts);
+  return [command, "--json", "--color", "never", ...args];
+}
+
+/**
+ * Plain-text workers use the same data-root support as streaming workers.
+ * The data root can be outside Git (a synced folder or plugin installation).
+ * This skips only Codex's Git check; sandbox and approval flags still come
+ * from cli-fencing.mjs, and no persistent project trust is granted.
+ * @param {string} prompt
+ * @param {{model?: string | null, effort?: string | null}} [opts]
+ * @returns {string[]}
+ */
+export function codexTextArgs(prompt, opts = {}) {
+  return ["exec", "--skip-git-repo-check", ...codexModelFlags(opts), prompt];
 }
 
 /**
@@ -506,6 +523,7 @@ export function killMsForKind(kind) {
  */
 export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet }) {
   if (emittedText || sawError) return null;
+  if (stderrSnippet && CODEX_UNTRUSTED_DIRECTORY_RE.test(stderrSnippet)) return `Codex could not start: ${stderrSnippet}`;
   const detail = stderrSnippet ? ` (${stderrSnippet})` : "";
   if (!cleanExit) return `The CLI exited with an error — is it installed and authenticated?${detail}`;
   return `The CLI produced no output — is it installed and authenticated?${detail} (career-ops is best on Claude Code.)`;

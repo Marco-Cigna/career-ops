@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   accumulateTokens,
   codexStreamArgs,
+  codexTextArgs,
   completedReportNames,
   hasNewCompletedReport,
   newCompletedReportNum,
@@ -541,14 +542,37 @@ test("newCompletedReportNum is the leading number of the new report", () => {
 
 test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
   // Given/When: the structured-stream argv for a prompt. This is the invocation
-  // /api/run uses; CliSpec.args stays plain `["exec", prompt]` because every other
+  // /api/run uses; CliSpec.args stays plain text because every other
   // surface reads codex's stdout as raw text (envelopes, the planners' JSON array),
   // and JSONL there would corrupt all of them.
   const args = codexStreamArgs("PROMPT");
 
   // Then: --json produces the events, --color never keeps ANSI out of the strings,
   // and the prompt stays last (a positional, not a flag value).
-  assert.deepEqual(args, ["exec", "--json", "--color", "never", "PROMPT"]);
+  assert.deepEqual(args, ["exec", "--json", "--color", "never", "--skip-git-repo-check", "PROMPT"]);
+});
+
+test("both Codex output modes support a data root outside Git without changing permissions", () => {
+  const options = { model: "gpt-6.1-sol", effort: "high" };
+  for (const build of [codexTextArgs, codexStreamArgs]) {
+    const args = build("PROMPT", options);
+    assert.equal(args[0], "exec");
+    assert.equal(args.at(-1), "PROMPT");
+    assert.equal(args.filter((arg) => arg === "--skip-git-repo-check").length, 1);
+    assert.ok(args.includes("gpt-6.1-sol"));
+    assert.ok(args.includes("model_reasoning_effort=high"));
+    assert.ok(!args.includes("--trust"));
+    assert.ok(!args.includes("--dangerously-bypass-approvals-and-sandbox"));
+    assert.ok(!args.some((arg) => arg.startsWith("sandbox_mode=")));
+  }
+  assert.ok(!codexTextArgs("PROMPT").includes("--json"), "plain-text consumers must not receive JSONL");
+});
+
+test("the actual Git-directory startup failure is captured and reported without an authentication hint", () => {
+  const stderrSnippet = "Not inside a trusted directory and --skip-git-repo-check was not specified.";
+  assert.equal(isFatalCodexStderr(stderrSnippet), true);
+  assert.equal(noOutputError({ emittedText: false, sawError: false, cleanExit: false, stderrSnippet }), `Codex could not start: ${stderrSnippet}`);
+  assert.equal(noOutputError({ emittedText: true, sawError: false, cleanExit: true, stderrSnippet }), null);
 });
 
 test("the argv keeps --json and the parser reads the JSONL it turns on", () => {
