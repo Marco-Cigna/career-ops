@@ -41,7 +41,12 @@ $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.Wind
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Career Ops scheduled-jobs queue worker every 15 minutes (local-only, zero-token; current user must be logged in)' -Force | Out-Null
 $registered = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
 $actual = $registered.Principal
-if ($actual.UserId -ne $principal.UserId -or $actual.LogonType.ToString() -notin @('Interactive', 'InteractiveToken') -or $actual.RunLevel.ToString() -ne 'Limited') {
+# Task Scheduler stores a LOCAL account without its machine prefix: registering
+# "DESKTOP-ABC\Marco" reads back as "Marco". Accept exactly that one shortening
+# (the prefix must be this computer's name); any other user is still refused.
+$expectedUsers = @($principal.UserId)
+if ($principal.UserId -like "$env:COMPUTERNAME\*") { $expectedUsers += $principal.UserId.Substring($env:COMPUTERNAME.Length + 1) }
+if ($actual.UserId -notin $expectedUsers -or $actual.LogonType.ToString() -notin @('Interactive', 'InteractiveToken') -or $actual.RunLevel.ToString() -ne 'Limited') {
   throw "Scheduled task '$taskName' has an unexpected security context (UserId=$($actual.UserId), LogonType=$($actual.LogonType), RunLevel=$($actual.RunLevel)); refusing to continue."
 }
 Write-Output "Installed '$taskName' for $($principal.UserId) with Node $version ($node) (interactive; the user must be logged in)."
