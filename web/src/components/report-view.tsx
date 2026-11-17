@@ -29,6 +29,7 @@ import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { ReportMarkdown } from "@/components/report-markdown";
 import { KeywordCoverage } from "@/components/keyword-coverage";
 import { CompanyEvidence } from "@/components/company-evidence";
+import { JobQuestions } from "@/components/job-questions";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { cvDiskState } from "@/lib/cv-disk-state.mjs";
 import { reportSpendActions } from "@/lib/report-spend-actions.mjs";
@@ -137,7 +138,7 @@ export function ReportView({
           {(() => {
             const { intro, sections } = splitSections(meta?.body ?? report);
             const verdictSection = sections.find((s) => isVerdictHeading(s.heading));
-            const rest = sections.filter((s) => s !== verdictSection);
+            const rest = sections.filter((s) => s !== verdictSection && s.heading.trim() !== "Portal Questions (draft)");
             const machine = rest.filter((s) => isMachine(s.heading));
             const mainSections = rest.filter((s) => !isMachine(s.heading));
             const reason = verdictReason({
@@ -276,6 +277,7 @@ export function ReportView({
           {/* After the report body: the reader has just decided whether the
               offer is worth applying to, and this answers the next question —
               whether the CV they would send reads as a match for it. */}
+          {app && <JobQuestions key={id} applicationId={id} />}
           <KeywordCoverage reportId={id} />
           {/* Then the company itself. Only with a tracker row: the card is keyed
               on a company name, and a report with no row has none to look up —

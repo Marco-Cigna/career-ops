@@ -6,6 +6,59 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
+export const PORTAL_QUESTIONS_HEADING = '## Portal Questions (draft)';
+
+// Editable portal drafts belong to the posting's report, separately from the
+// filled/submitted Application Answers snapshot. Quote user text so headings
+// inside a question or answer cannot become report sections.
+const PORTAL_DATA_OPEN = '<!-- career-ops:portal-questions\n';
+const PORTAL_DATA_CLOSE = '\n-->';
+
+function portalSectionRange(report) {
+  const heading = findUnfencedHeading(report, /^## Portal Questions \(draft\)[ \t]*\r?$/);
+  if (!heading) return null;
+  const after = heading.index + heading[0].length;
+  const next = findUnfencedHeading(report.slice(after), ANSWERS_SECTION_END_RE);
+  return { start: heading.index, end: next ? after + next.index : report.length };
+}
+
+export function parsePortalQuestionsSection(reportText) {
+  const report = String(reportText ?? '');
+  const range = portalSectionRange(report);
+  if (!range) return null;
+  const section = report.slice(range.start, range.end).replace(/\r\n/g, '\n');
+  const from = section.indexOf(PORTAL_DATA_OPEN);
+  const to = section.indexOf(PORTAL_DATA_CLOSE, from + PORTAL_DATA_OPEN.length);
+  if (from < 0 || to < 0) throw new Error('The saved Portal Questions section is unreadable. Repair it before saving new questions.');
+  const snapshot = JSON.parse(section.slice(from + PORTAL_DATA_OPEN.length, to));
+  if (!snapshot || !Array.isArray(snapshot.questions) || typeof snapshot.savedAt !== 'string') throw new Error('Invalid saved Portal Questions data.');
+  if (section.trim() !== formatPortalQuestionsSection(snapshot).trim()) throw new Error('The saved Portal Questions text differs from its structured data. Repair the section before saving new questions.');
+  return snapshot;
+}
+
+function formatPortalQuestionsSection(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.questions) || typeof snapshot.savedAt !== 'string') throw new Error('Invalid Portal Questions snapshot.');
+  const visible = [PORTAL_QUESTIONS_HEADING, '', `**Saved:** ${snapshot.savedAt}`, '', 'Drafts for review; not filled or submitted.', ''];
+  snapshot.questions.forEach((entry, i) => {
+    visible.push(`### Question ${i + 1}`, '', quoteBlock(entry.question), '', '**Draft answer:**', '', quoteBlock(entry.answer), '');
+    if (entry.notes) visible.push('**Review note:**', '', quoteBlock(entry.notes), '');
+  });
+  // Prevent user text from closing its metadata comment. The JSON is the
+  // editable UI's structured representation; the prose above stays readable.
+  const data = JSON.stringify(snapshot).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  return [...visible, PORTAL_DATA_OPEN + data + PORTAL_DATA_CLOSE, ''].join('\n');
+}
+
+export function upsertPortalQuestionsSection(reportText, snapshot) {
+  const report = String(reportText ?? '');
+  const eol = report.includes('\r\n') ? '\r\n' : '\n';
+  const section = formatPortalQuestionsSection(snapshot).replace(/\n/g, eol);
+  const range = portalSectionRange(report);
+  if (!range) return report + (report.endsWith(eol + eol) ? '' : report.endsWith(eol) ? eol : eol + eol) + section;
+  // Refuse to overwrite a manually damaged section as if it were absent.
+  parsePortalQuestionsSection(report);
+  return report.slice(0, range.start) + section + (range.end < report.length ? eol : '') + report.slice(range.end);
+}
 
 const VALID_STATES = new Set(['filled', 'submitted']);
 // A level-1/2 Markdown heading closes this section, including tabs, up to

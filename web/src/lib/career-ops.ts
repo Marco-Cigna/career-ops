@@ -500,6 +500,16 @@ export function findReportFile(n: string): string | null {
   return resolveReportFile(target, app?.report, root, () => listReportFiles(root));
 }
 
+/** Exact linked report only, for edits attached to a tracked posting. Never
+ * guess from the tracker number: report and application counters can differ. */
+export function findLinkedReportForWrite(n: string): string | null {
+  if (!/^\d+$/.test(n)) return null;
+  const app = findApplication(n);
+  const root = careerOpsRoot();
+  return linkedReportPaths(app ?? undefined, root, soleMarkdownLinkTarget)
+    .find((file) => isRegularContainedFile(file, root)) ?? null;
+}
+
 export function requestReportReader(): (app: Pick<Application, "n" | "report">) => ReportData | null {
   const root = careerOpsRoot();
   let files: string[] | null | undefined;
